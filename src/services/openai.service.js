@@ -161,6 +161,149 @@ class OpenAIService {
       throw error;
     }
   }
+
+  /**
+   * Generate a streaming chat completion directly without using tools
+   * @param {Array} messages - Chat messages
+   * @param {Function} onChunk - Callback for each chunk of the response
+   * @returns {Promise} - Promise that resolves when streaming is complete
+   */
+  async generateChatCompletionStream(messages, onChunk) {
+    if (!this.isConfigured) {
+      console.error('Azure OpenAI is not configured. Keys missing:', {
+        apiKey: !this.apiKey,
+        endpoint: !this.endpoint,
+        deploymentName: !this.deploymentName
+      });
+      throw new Error('Azure OpenAI is not configured');
+    }
+
+    try {
+      console.log('Starting OpenAI streaming request with config:', {
+        endpoint: this.endpoint ? `${this.endpoint.substring(0, 10)}...` : 'missing',
+        deploymentName: this.deploymentName || 'missing',
+        apiVersion: this.apiVersion,
+        messageCount: messages.length
+      });
+      
+      // Normalize endpoint (remove trailing slash if present)
+      const normalizedEndpoint = this.endpoint.endsWith('/') 
+        ? this.endpoint.slice(0, -1) 
+        : this.endpoint;
+      
+      // Form the Azure OpenAI API URL
+      const apiUrl = `${normalizedEndpoint}/openai/deployments/${this.deploymentName}/chat/completions?api-version=${this.apiVersion}`;
+      
+      // Prepare request payload with streaming enabled
+      const payload = {
+        messages,
+        temperature: 0.7,
+        max_tokens: 800,
+        top_p: 0.95,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+        stop: null,
+        stream: true
+      };
+      
+      console.log('Sending streaming request to:', apiUrl.replace(this.apiKey, '[REDACTED]'));
+      
+      // Create a custom axios instance for streaming
+      const streamingClient = axios.create({
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': this.apiKey
+        },
+        responseType: 'stream'
+      });
+      
+      // Send streaming request to Azure OpenAI
+      const response = await streamingClient.post(apiUrl, payload);
+      console.log('Streaming response received, status:', response.status);
+      
+      // Process the stream
+      return new Promise((resolve, reject) => {
+        let buffer = '';
+        let assistantMessage = {
+          role: 'assistant',
+          content: ''
+        };
+        
+        response.data.on('data', (chunk) => {
+          const chunkString = chunk.toString();
+          buffer += chunkString;
+          
+          // Process complete lines from buffer
+          let lines = buffer.split('\n');
+          buffer = lines.pop(); // Keep the last incomplete line in the buffer
+          
+          for (const line of lines) {
+            // Skip empty lines
+            if (!line.trim()) continue;
+            
+            // Handle data lines
+            if (line.startsWith('data: ')) {
+              const data = line.substring(6);
+              
+              // Check for end of stream
+              if (data === '[DONE]') {
+                onChunk(assistantMessage);
+                return;
+              }
+              
+              try {
+                const parsed = JSON.parse(data);
+                const content = parsed.choices[0]?.delta?.content || '';
+                
+                if (content) {
+                  assistantMessage.content += content;
+                  // Clone the message to avoid reference issues
+                  onChunk({...assistantMessage});
+                }
+              } catch (e) {
+                console.error('Error parsing streaming data:', e, data);
+              }
+            }
+          }
+        });
+        
+        response.data.on('end', () => {
+          // Process any remaining data in the buffer
+          if (buffer.trim() && buffer.startsWith('data: ')) {
+            try {
+              const data = buffer.substring(6);
+              if (data !== '[DONE]') {
+                const parsed = JSON.parse(data);
+                const content = parsed.choices[0]?.delta?.content || '';
+                
+                if (content) {
+                  assistantMessage.content += content;
+                  onChunk({...assistantMessage});
+                }
+              }
+            } catch (e) {
+              console.error('Error parsing final streaming data:', e, buffer);
+            }
+          }
+          
+          console.log('Streaming completed successfully');
+          resolve(assistantMessage);
+        });
+        
+        response.data.on('error', (err) => {
+          console.error('Streaming error:', err);
+          reject(err);
+        });
+      });
+    } catch (error) {
+      console.error('Error in generateChatCompletionStream:', error.message);
+      if (error.response) {
+        console.error('Response status:', error.response.status);
+        console.error('Response data:', error.response.data);
+      }
+      throw error;
+    }
+  }
 }
 
 module.exports = new OpenAIService();

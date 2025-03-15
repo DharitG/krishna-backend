@@ -100,32 +100,92 @@ exports.executeToolCall = async (req, res, next) => {
     const useTools = enabledTools && enabledTools.length > 0;
     
     try {
-      let result;
+      // Set up streaming response headers if streaming is requested
+      if (stream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.flushHeaders(); // Flush the headers to establish SSE with client
+      }
       
       // Only use LangChain agent if tools are enabled
       if (useTools) {
         console.log(`Processing message with tools enabled: ${enabledTools.join(', ')}`);
-        result = await langchainService.processMessage(
-          userId,
-          messages, 
-          enabledTools,
-          authStatus
-        );
+        
+        if (stream) {
+          // Not implemented yet - tools with streaming
+          // For now, just use non-streaming approach and send the full response at once
+          const result = await langchainService.processMessage(
+            userId,
+            messages, 
+            enabledTools,
+            authStatus
+          );
+          
+          // Send the result as a single event
+          res.write(`data: ${JSON.stringify(result)}\n\n`);
+          res.write('data: [DONE]\n\n');
+          res.end();
+        } else {
+          // Non-streaming approach with tools
+          const result = await langchainService.processMessage(
+            userId,
+            messages, 
+            enabledTools,
+            authStatus
+          );
+          return res.json(result);
+        }
       } else {
         // For simple messages without tools, use a more direct approach
         console.log('Processing message without tools');
-        // Use OpenAI service directly without creating an agent
         const openaiService = require('../services/openai.service');
-        result = await openaiService.generateChatCompletion(messages);
+        
+        if (stream) {
+          // Use streaming approach
+          console.log('Using streaming response');
+          await openaiService.generateChatCompletionStream(messages, (chunk) => {
+            // Send each chunk as an SSE event
+            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+          });
+          
+          // Signal the end of the stream
+          res.write('data: [DONE]\n\n');
+          res.end();
+        } else {
+          // Use non-streaming approach
+          const result = await openaiService.generateChatCompletion(messages);
+          return res.json(result);
+        }
       }
-      
-      return res.json(result);
     } catch (error) {
       console.error('Error processing message:', error);
-      return res.status(500).json({ 
-        message: 'Error processing message', 
-        error: error.message || 'Unknown error' 
-      });
+      
+      // Handle errors differently for streaming vs non-streaming
+      if (stream && !res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+      }
+      
+      if (stream && !res.finished) {
+        // Send error as an event
+        const errorMessage = {
+          role: 'assistant',
+          content: `Error: ${error.message || 'Unknown error occurred'}`,
+          error: true
+        };
+        res.write(`data: ${JSON.stringify(errorMessage)}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+      } else if (!stream) {
+        // Regular error response
+        return res.status(500).json({ 
+          message: 'Error processing message', 
+          error: error.message || 'Unknown error' 
+        });
+      }
     }
   } catch (error) {
     console.error('Error in executeToolCall:', error);

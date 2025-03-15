@@ -201,7 +201,7 @@ exports.sendMessage = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { chatId } = req.params;
-    const { content, messages, enabledTools = [], authStatus = {} } = req.body;
+    const { content, messages, enabledTools = [], stream = false, authStatus = {} } = req.body;
     
     // Get chat
     const { data: chat, error: chatError } = await supabase
@@ -276,76 +276,229 @@ exports.sendMessage = async (req, res, next) => {
       });
     }
     
+    // Set up streaming response headers if streaming is requested
+    if (stream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.flushHeaders(); // Flush the headers to establish SSE with client
+    }
+    
     try {
       // Determine if tools should be used
       const useTools = chat.use_tools && chat.enabled_tools && chat.enabled_tools.length > 0;
       
-      let response;
-      
       if (useTools) {
         // Use LangChain service for tool-enabled messages
         console.log(`Processing message with tools: ${chat.enabled_tools.join(', ')}`);
-        response = await langchainService.processMessage(
-          userId,
-          updatedMessages,
-          chat.enabled_tools,
-          combinedAuthStatus
-        );
+        
+        if (stream) {
+          // Not implemented yet - tools with streaming
+          // For now, just use non-streaming approach and send the full response at once
+          const response = await langchainService.processMessage(
+            userId,
+            updatedMessages,
+            chat.enabled_tools,
+            combinedAuthStatus
+          );
+          
+          // Add assistant response to the database
+          const assistantMessage = {
+            ...response,
+            createdAt: new Date().toISOString()
+          };
+          
+          const finalMessages = [...updatedMessages, assistantMessage];
+          
+          // Update chat with assistant response
+          await supabase
+            .from('chats')
+            .update({
+              messages: finalMessages,
+              updated_at: new Date()
+            })
+            .eq('id', chatId)
+            .eq('user_id', userId);
+          
+          // Send the result as a single event
+          res.write(`data: ${JSON.stringify(assistantMessage)}\n\n`);
+          res.write('data: [DONE]\n\n');
+          res.end();
+        } else {
+          // Non-streaming approach with tools
+          const response = await langchainService.processMessage(
+            userId,
+            updatedMessages,
+            chat.enabled_tools,
+            combinedAuthStatus
+          );
+          
+          // Add assistant response
+          const assistantMessage = {
+            ...response,
+            createdAt: new Date().toISOString()
+          };
+          
+          const finalMessages = [...updatedMessages, assistantMessage];
+          
+          // Update chat with assistant response
+          const updates = {
+            messages: finalMessages,
+            updated_at: new Date()
+          };
+          
+          // Update chat title if this is the first user message
+          if (updatedMessages.filter(m => m.role === 'user').length === 1) {
+            updates.title = userMessage.content.substring(0, 40) + (userMessage.content.length > 40 ? '...' : '');
+          }
+          
+          await supabase
+            .from('chats')
+            .update(updates)
+            .eq('id', chatId)
+            .eq('user_id', userId);
+          
+          res.json(assistantMessage);
+        }
       } else {
         // Use direct OpenAI service for regular messages
         console.log('Processing message without tools');
         const openaiService = require('../services/openai.service');
-        response = await openaiService.generateChatCompletion(updatedMessages);
+        
+        if (stream) {
+          // Use streaming approach
+          console.log('Using streaming response');
+          
+          // Create a temporary message to store the full response
+          let assistantMessage = {
+            role: 'assistant',
+            content: '',
+            createdAt: new Date().toISOString()
+          };
+          
+          // Stream the response
+          await openaiService.generateChatCompletionStream(updatedMessages, (chunk) => {
+            // Update the full message content
+            assistantMessage.content = chunk.content;
+            
+            // Send each chunk as an SSE event
+            res.write(`data: ${JSON.stringify({
+              role: 'assistant',
+              content: chunk.content,
+              createdAt: assistantMessage.createdAt
+            })}\n\n`);
+          });
+          
+          // Save the complete message to the database
+          const finalMessages = [...updatedMessages, assistantMessage];
+          
+          // Update chat with assistant response
+          const updates = {
+            messages: finalMessages,
+            updated_at: new Date()
+          };
+          
+          // Update chat title if this is the first user message
+          if (updatedMessages.filter(m => m.role === 'user').length === 1) {
+            updates.title = userMessage.content.substring(0, 40) + (userMessage.content.length > 40 ? '...' : '');
+          }
+          
+          await supabase
+            .from('chats')
+            .update(updates)
+            .eq('id', chatId)
+            .eq('user_id', userId);
+          
+          // Signal the end of the stream
+          res.write('data: [DONE]\n\n');
+          res.end();
+        } else {
+          // Use non-streaming approach
+          const response = await openaiService.generateChatCompletion(updatedMessages);
+          
+          // Add assistant response
+          const assistantMessage = {
+            ...response,
+            createdAt: new Date().toISOString()
+          };
+          
+          const finalMessages = [...updatedMessages, assistantMessage];
+          
+          // Update chat with assistant response
+          const updates = {
+            messages: finalMessages,
+            updated_at: new Date()
+          };
+          
+          // Update chat title if this is the first user message
+          if (updatedMessages.filter(m => m.role === 'user').length === 1) {
+            updates.title = userMessage.content.substring(0, 40) + (userMessage.content.length > 40 ? '...' : '');
+          }
+          
+          await supabase
+            .from('chats')
+            .update(updates)
+            .eq('id', chatId)
+            .eq('user_id', userId);
+          
+          res.json(assistantMessage);
+        }
       }
-      
-      // Add assistant response
-      const assistantMessage = {
-        ...response,
-        createdAt: new Date().toISOString()
-      };
-      
-      const finalMessages = [...updatedMessages, assistantMessage];
-      
-      // Update chat with assistant response
-      const updates = {
-        messages: finalMessages,
-        updated_at: new Date()
-      };
-      
-      // Update chat title if this is the first user message
-      if (updatedMessages.filter(m => m.role === 'user').length === 1) {
-        updates.title = userMessage.content.substring(0, 40) + (userMessage.content.length > 40 ? '...' : '');
-      }
-      
-      await supabase
-        .from('chats')
-        .update(updates)
-        .eq('id', chatId)
-        .eq('user_id', userId);
-      
-      res.json(assistantMessage);
     } catch (error) {
       console.error('Error sending message:', error);
       
-      // Add error message
-      const errorMessage = {
-        role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again later.',
-        error: true,
-        createdAt: new Date().toISOString()
-      };
+      // Handle errors differently for streaming vs non-streaming
+      if (stream && !res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+      }
       
-      // Update chat with error message
-      await supabase
-        .from('chats')
-        .update({
-          messages: [...updatedMessages, errorMessage],
-          updated_at: new Date()
-        })
-        .eq('id', chatId)
-        .eq('user_id', userId);
-      
-      res.status(500).json(errorMessage);
+      if (stream && !res.finished) {
+        // Add error message
+        const errorMessage = {
+          role: 'assistant',
+          content: 'Sorry, I encountered an error. Please try again later.',
+          error: true,
+          createdAt: new Date().toISOString()
+        };
+        
+        // Update chat with error message
+        await supabase
+          .from('chats')
+          .update({
+            messages: [...updatedMessages, errorMessage],
+            updated_at: new Date()
+          })
+          .eq('id', chatId)
+          .eq('user_id', userId);
+        
+        // Send error as an event
+        res.write(`data: ${JSON.stringify(errorMessage)}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+      } else if (!stream) {
+        // Add error message
+        const errorMessage = {
+          role: 'assistant',
+          content: 'Sorry, I encountered an error. Please try again later.',
+          error: true,
+          createdAt: new Date().toISOString()
+        };
+        
+        // Update chat with error message
+        await supabase
+          .from('chats')
+          .update({
+            messages: [...updatedMessages, errorMessage],
+            updated_at: new Date()
+          })
+          .eq('id', chatId)
+          .eq('user_id', userId);
+        
+        res.status(500).json(errorMessage);
+      }
     }
   } catch (error) {
     next(error);
