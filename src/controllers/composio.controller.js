@@ -1,5 +1,6 @@
 const { supabase } = require('../services/supabase');
 const composioService = require('../services/composio.service');
+const langchainService = require('../services/langchain.service');
 
 /**
  * Initialize authentication with a third-party service
@@ -120,6 +121,41 @@ exports.executeToolCall = async (req, res, next) => {
     const result = await composioService.handleToolCalls(toolCalls, tokenMap);
     
     res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Check authentication requirements for tools
+ */
+exports.checkToolAuth = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { tools } = req.body;
+    
+    const authResults = [];
+    
+    for (const tool of tools) {
+      // Extract service name from tool (e.g., "GITHUB_CREATE_ISSUE" -> "GITHUB")
+      const serviceName = tool.split('_')[0].toUpperCase();
+      
+      // Check if authentication is needed
+      const authResult = await langchainService.setupUserConnectionIfNotExists(
+        userId, 
+        serviceName
+      );
+      
+      if (authResult.needsAuth) {
+        authResults.push({
+          service: serviceName,
+          redirectUrl: authResult.redirectUrl,
+          status: 'pending'
+        });
+      }
+    }
+    
+    res.json({ authRequirements: authResults });
   } catch (error) {
     next(error);
   }

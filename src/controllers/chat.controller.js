@@ -1,5 +1,6 @@
 const { supabase } = require('../services/supabase');
 const openaiService = require('../services/openai.service');
+const langchainService = require('../services/langchain.service');
 
 /**
  * Get all chats for the current user
@@ -252,11 +253,11 @@ exports.sendMessage = async (req, res, next) => {
     }
     
     try {
-      // Send to OpenAI
-      const response = await openaiService.sendMessage(
+      // Use LangChain service instead of direct OpenAI
+      const response = await langchainService.processMessage(
+        userId,
         messages,
         chat.enabled_tools,
-        chat.use_tools,
         authStatus
       );
       

@@ -20,11 +20,15 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@langchain/openai": "^0.4.4",
     "@supabase/supabase-js": "^2.49.1",
+    "composio-core": "^0.5.18",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
+    "langchain": "^0.3.19",
+    "langchain-core": "^0.0.4",
     "morgan": "^1.10.0"
   },
   "devDependencies": {
