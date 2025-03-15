@@ -75,7 +75,18 @@ class LangChainService {
 
   async processMessage(userId, messages, enabledTools = [], authStatus = {}) {
     try {
-      // Create agent
+      // Check if tools are actually needed
+      const useTools = enabledTools && enabledTools.length > 0;
+      
+      if (!useTools) {
+        // If no tools are needed, use the OpenAI service directly
+        console.log('No tools needed, using OpenAI service directly');
+        const openaiService = require('./openai.service');
+        return await openaiService.generateChatCompletion(messages);
+      }
+      
+      // Tools are needed, create an agent
+      console.log(`Creating agent with tools: ${enabledTools.join(', ')}`);
       const agentExecutor = await this.createAgent(userId, enabledTools, authStatus);
       
       // Format messages for LangChain

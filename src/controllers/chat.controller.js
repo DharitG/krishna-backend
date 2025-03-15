@@ -201,7 +201,7 @@ exports.sendMessage = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { chatId } = req.params;
-    const { content } = req.body;
+    const { content, messages, enabledTools = [], authStatus = {} } = req.body;
     
     // Get chat
     const { data: chat, error: chatError } = await supabase
@@ -216,20 +216,44 @@ exports.sendMessage = async (req, res, next) => {
       return res.status(404).json({ message: 'Chat not found', error: chatError.message });
     }
     
-    // Add user message
-    const userMessage = {
-      role: 'user',
-      content,
-      createdAt: new Date().toISOString()
-    };
+    // Handle both formats - either content directly or messages array
+    let userMessage;
+    let existingMessages;
     
-    const messages = [...chat.messages, userMessage];
+    if (messages && Array.isArray(messages)) {
+      // If messages array is provided, use the last user message
+      userMessage = messages.filter(m => m.role === 'user').pop();
+      // Use the provided messages array
+      existingMessages = chat.messages;
+    } else if (content) {
+      // Create user message from content
+      userMessage = {
+        role: 'user',
+        content,
+        createdAt: new Date().toISOString()
+      };
+      // Use existing messages from the chat
+      existingMessages = chat.messages;
+    } else {
+      return res.status(400).json({ message: 'No message content provided' });
+    }
+    
+    // Add user message to existing messages if not already included
+    const messageExists = existingMessages.some(m => 
+      m.role === userMessage.role && 
+      m.content === userMessage.content &&
+      m.createdAt === userMessage.createdAt
+    );
+    
+    const updatedMessages = messageExists 
+      ? existingMessages 
+      : [...existingMessages, userMessage];
     
     // Update chat with user message
     await supabase
       .from('chats')
       .update({
-        messages,
+        messages: updatedMessages,
         updated_at: new Date()
       })
       .eq('id', chatId)
@@ -242,24 +266,37 @@ exports.sendMessage = async (req, res, next) => {
       .eq('user_id', userId);
     
     // Process auth status
-    const authStatus = {};
+    const combinedAuthStatus = { ...authStatus };
     const now = new Date();
     
     if (serviceTokens) {
       serviceTokens.forEach(token => {
         const isValid = token.expires_at ? new Date(token.expires_at) > now : false;
-        authStatus[token.service_name] = isValid;
+        combinedAuthStatus[token.service_name] = isValid;
       });
     }
     
     try {
-      // Use LangChain service instead of direct OpenAI
-      const response = await langchainService.processMessage(
-        userId,
-        messages,
-        chat.enabled_tools,
-        authStatus
-      );
+      // Determine if tools should be used
+      const useTools = chat.use_tools && chat.enabled_tools && chat.enabled_tools.length > 0;
+      
+      let response;
+      
+      if (useTools) {
+        // Use LangChain service for tool-enabled messages
+        console.log(`Processing message with tools: ${chat.enabled_tools.join(', ')}`);
+        response = await langchainService.processMessage(
+          userId,
+          updatedMessages,
+          chat.enabled_tools,
+          combinedAuthStatus
+        );
+      } else {
+        // Use direct OpenAI service for regular messages
+        console.log('Processing message without tools');
+        const openaiService = require('../services/openai.service');
+        response = await openaiService.generateChatCompletion(updatedMessages);
+      }
       
       // Add assistant response
       const assistantMessage = {
@@ -267,17 +304,17 @@ exports.sendMessage = async (req, res, next) => {
         createdAt: new Date().toISOString()
       };
       
-      const updatedMessages = [...messages, assistantMessage];
+      const finalMessages = [...updatedMessages, assistantMessage];
       
       // Update chat with assistant response
       const updates = {
-        messages: updatedMessages,
+        messages: finalMessages,
         updated_at: new Date()
       };
       
       // Update chat title if this is the first user message
-      if (messages.filter(m => m.role === 'user').length === 1) {
-        updates.title = content.substring(0, 40) + (content.length > 40 ? '...' : '');
+      if (updatedMessages.filter(m => m.role === 'user').length === 1) {
+        updates.title = userMessage.content.substring(0, 40) + (userMessage.content.length > 40 ? '...' : '');
       }
       
       await supabase
@@ -302,7 +339,7 @@ exports.sendMessage = async (req, res, next) => {
       await supabase
         .from('chats')
         .update({
-          messages: [...messages, errorMessage],
+          messages: [...updatedMessages, errorMessage],
           updated_at: new Date()
         })
         .eq('id', chatId)

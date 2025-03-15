@@ -26,6 +26,11 @@ app.use('/api/composio', requireAuth, composioRoutes);
 app.use('/api/preferences', requireAuth, preferencesRoutes);
 app.use('/api/chats', requireAuth, chatRoutes);
 
+// Public test endpoint (no auth required)
+app.get('/api/test', (req, res) => {
+  res.status(200).json({ message: 'Backend API is working!', auth: false });
+});
+
 // Health check endpoint (no auth required)
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });

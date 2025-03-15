@@ -82,46 +82,53 @@ exports.getTools = async (req, res, next) => {
 exports.executeToolCall = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { toolCalls } = req.body;
+    const { messages, enabledTools = [], stream = false, authStatus = {} } = req.body;
     
-    // Extract services from tool calls
-    const serviceNames = toolCalls.map(tc => {
-      // Example: "GMAIL_SEND_EMAIL" -> "gmail"
-      return tc.function.name.split('_')[0].toLowerCase();
-    });
+    // If there are no messages, return an error
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ message: 'No messages provided' });
+    }
+
+    // Get the last user message
+    const lastUserMessage = messages.filter(m => m.role === 'user').pop();
     
-    // Get unique service names
-    const uniqueServices = [...new Set(serviceNames)];
-    
-    // Get service tokens
-    const { data: serviceTokens, error } = await supabase
-      .from('service_tokens')
-      .select('service_name, access_token, refresh_token')
-      .eq('user_id', userId)
-      .in('service_name', uniqueServices);
-    
-    if (error) {
-      console.error('Error fetching service tokens:', error);
-      return res.status(500).json({ message: 'Error fetching service tokens', error: error.message });
+    if (!lastUserMessage) {
+      return res.status(400).json({ message: 'No user message found in the provided messages' });
     }
     
-    // Convert to format expected by composio service
-    const tokenMap = {};
+    // Check if tools are needed/enabled
+    const useTools = enabledTools && enabledTools.length > 0;
     
-    if (serviceTokens) {
-      serviceTokens.forEach(token => {
-        tokenMap[token.service_name] = {
-          accessToken: token.access_token,
-          refreshToken: token.refresh_token
-        };
+    try {
+      let result;
+      
+      // Only use LangChain agent if tools are enabled
+      if (useTools) {
+        console.log(`Processing message with tools enabled: ${enabledTools.join(', ')}`);
+        result = await langchainService.processMessage(
+          userId,
+          messages, 
+          enabledTools,
+          authStatus
+        );
+      } else {
+        // For simple messages without tools, use a more direct approach
+        console.log('Processing message without tools');
+        // Use OpenAI service directly without creating an agent
+        const openaiService = require('../services/openai.service');
+        result = await openaiService.generateChatCompletion(messages);
+      }
+      
+      return res.json(result);
+    } catch (error) {
+      console.error('Error processing message:', error);
+      return res.status(500).json({ 
+        message: 'Error processing message', 
+        error: error.message || 'Unknown error' 
       });
     }
-    
-    // Execute tool call with Composio
-    const result = await composioService.handleToolCalls(toolCalls, tokenMap);
-    
-    res.json(result);
   } catch (error) {
+    console.error('Error in executeToolCall:', error);
     next(error);
   }
 };

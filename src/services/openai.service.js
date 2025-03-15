@@ -115,6 +115,52 @@ class OpenAIService {
       throw error;
     }
   }
+
+  /**
+   * Generate a chat completion directly without using tools
+   * @param {Array} messages - Chat messages
+   * @returns {Object} - The assistant's response
+   */
+  async generateChatCompletion(messages) {
+    if (!this.isConfigured) {
+      throw new Error('Azure OpenAI is not configured');
+    }
+
+    try {
+      // Normalize endpoint (remove trailing slash if present)
+      const normalizedEndpoint = this.endpoint.endsWith('/') 
+        ? this.endpoint.slice(0, -1) 
+        : this.endpoint;
+      
+      // Form the Azure OpenAI API URL
+      const apiUrl = `${normalizedEndpoint}/openai/deployments/${this.deploymentName}/chat/completions?api-version=${this.apiVersion}`;
+      
+      // Prepare request payload - without tools
+      const payload = {
+        messages,
+        temperature: 0.7,
+        max_tokens: 800,
+        top_p: 0.95,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+        stop: null
+      };
+      
+      // Send request to Azure OpenAI
+      const response = await this.client.post(apiUrl, payload);
+      
+      // Get assistant message from response
+      const assistantMessage = response.data.choices[0].message;
+      
+      return {
+        role: 'assistant',
+        content: assistantMessage.content
+      };
+    } catch (error) {
+      console.error('Error calling Azure OpenAI for chat completion:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new OpenAIService();

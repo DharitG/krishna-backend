@@ -15,7 +15,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // Test connection
 const testConnection = async () => {
   try {
-    const { data, error } = await supabase.from('users').select('count', { count: 'exact' }).limit(0);
+    const { data, error } = await supabase.from('chats').select('count', { count: 'exact' }).limit(0);
     
     if (error) {
       throw error;
