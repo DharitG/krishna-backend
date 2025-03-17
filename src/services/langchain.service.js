@@ -2,6 +2,7 @@ const { ChatOpenAI } = require("@langchain/openai");
 const { createOpenAIFunctionsAgent, AgentExecutor } = require("langchain/agents");
 const { pull } = require("langchain/hub");
 const { LangchainToolSet } = require("composio-core");
+const { AUGUST_SYSTEM_PROMPT } = require("../config/august-system-prompt");
 
 class LangChainService {
   constructor() {
@@ -38,9 +39,9 @@ class LangChainService {
 
   async createAgent(userId, enabledTools = [], authStatus = {}) {
     if (!this.isConfigured) {
-      throw new Error('LangChain service is not configured');
+      throw new Error('LangChain service not fully configured');
     }
-
+    
     // Create entity and get tools
     const entity = this.toolset.client.getEntity(userId);
     
@@ -58,6 +59,7 @@ class LangChainService {
       azureOpenAIApiDeploymentName: process.env.AZURE_OPENAI_DEPLOYMENT_NAME,
       azureOpenAIApiInstanceName: new URL(this.endpoint).hostname.split('.')[0],
       temperature: 0.7,
+      systemMessage: AUGUST_SYSTEM_PROMPT,
     });
     
     const agent = await createOpenAIFunctionsAgent({
@@ -116,7 +118,7 @@ class LangChainService {
 
   async getStreamingAgentResponse(messages, enabledTools = [], userId = 'default-user') {
     if (!this.isConfigured) {
-      throw new Error('LangChain service is not configured');
+      throw new Error('LangChain service not fully configured');
     }
 
     // Check if tools are actually needed
@@ -147,6 +149,7 @@ class LangChainService {
       azureOpenAIApiInstanceName: new URL(this.endpoint).hostname.split('.')[0],
       temperature: 0.7,
       streaming: true,
+      systemMessage: AUGUST_SYSTEM_PROMPT,
     });
     
     const agent = await createOpenAIFunctionsAgent({

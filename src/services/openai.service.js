@@ -1,6 +1,7 @@
 require('dotenv').config();
 const axios = require('axios');
 const composioService = require('./composio.service');
+const { AUGUST_SYSTEM_PROMPT } = require("../config/august-system-prompt");
 
 class OpenAIService {
   constructor() {
@@ -49,7 +50,12 @@ class OpenAIService {
       
       // Prepare request payload
       const payload = {
-        messages,
+        messages: [
+          // Add system message
+          { role: 'system', content: AUGUST_SYSTEM_PROMPT },
+          // Add user messages
+          ...messages
+        ],
         temperature: 0.7,
         max_tokens: 800,
         top_p: 0.95,
@@ -135,9 +141,14 @@ class OpenAIService {
       // Form the Azure OpenAI API URL
       const apiUrl = `${normalizedEndpoint}/openai/deployments/${this.deploymentName}/chat/completions?api-version=${this.apiVersion}`;
       
-      // Prepare request payload - without tools
+      // Prepare request payload
       const payload = {
-        messages,
+        messages: [
+          // Add system message
+          { role: 'system', content: AUGUST_SYSTEM_PROMPT },
+          // Add user messages
+          ...messages
+        ],
         temperature: 0.7,
         max_tokens: 800,
         top_p: 0.95,
@@ -196,7 +207,12 @@ class OpenAIService {
       
       // Prepare request payload with streaming enabled
       const payload = {
-        messages,
+        messages: [
+          // Add system message
+          { role: 'system', content: AUGUST_SYSTEM_PROMPT },
+          // Add user messages
+          ...messages
+        ],
         temperature: 0.7,
         max_tokens: 800,
         top_p: 0.95,
