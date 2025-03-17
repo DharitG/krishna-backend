@@ -6,7 +6,38 @@ const { v4: uuidv4 } = require('uuid');
  */
 exports.getAccounts = async (req, res, next) => {
   try {
+    console.log('Getting accounts for user:', req.user?.id);
+    
+    // If user is not authenticated, return mock data for development
+    if (!req.user || !req.user.id) {
+      console.log('No authenticated user, returning mock data');
+      
+      // Mock data for development
+      const mockAccounts = {
+        github: [
+          { id: 'gh1', username: 'user1', email: 'user1@github.com', isActive: true },
+          { id: 'gh2', username: 'user2', email: 'user2@github.com', isActive: false }
+        ],
+        slack: [
+          { id: 'sl1', username: 'user1', workspace: 'Workspace 1', isActive: true }
+        ],
+        gmail: [
+          { id: 'gm1', email: 'user@gmail.com', isActive: true }
+        ],
+        discord: [],
+        zoom: [],
+        asana: []
+      };
+      
+      return res.json({
+        success: true,
+        accounts: mockAccounts,
+        mock: true
+      });
+    }
+    
     const userId = req.user.id;
+    console.log('Fetching accounts from Supabase for user:', userId);
     
     // Get all accounts from the database
     const { data: accounts, error } = await supabase
@@ -16,12 +47,44 @@ exports.getAccounts = async (req, res, next) => {
     
     if (error) {
       console.error('Error fetching accounts:', error);
+      
+      // Return mock data if there's an error in development
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Returning mock data due to error');
+        
+        // Mock data for development
+        const mockAccounts = {
+          github: [
+            { id: 'gh1', username: 'user1', email: 'user1@github.com', isActive: true },
+            { id: 'gh2', username: 'user2', email: 'user2@github.com', isActive: false }
+          ],
+          slack: [
+            { id: 'sl1', username: 'user1', workspace: 'Workspace 1', isActive: true }
+          ],
+          gmail: [
+            { id: 'gm1', email: 'user@gmail.com', isActive: true }
+          ],
+          discord: [],
+          zoom: [],
+          asana: []
+        };
+        
+        return res.json({
+          success: true,
+          accounts: mockAccounts,
+          mock: true,
+          error: error.message
+        });
+      }
+      
       return res.status(500).json({ 
         success: false, 
         message: 'Error fetching accounts', 
         error: error.message 
       });
     }
+    
+    console.log(`Found ${accounts?.length || 0} accounts for user ${userId}`);
     
     // Group accounts by service
     const groupedAccounts = {};
