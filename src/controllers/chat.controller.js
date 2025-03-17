@@ -272,8 +272,49 @@ exports.sendMessage = async (req, res, next) => {
     if (serviceTokens) {
       serviceTokens.forEach(token => {
         const isValid = token.expires_at ? new Date(token.expires_at) > now : false;
-        combinedAuthStatus[token.service_name] = isValid;
+        combinedAuthStatus[token.service_name.toLowerCase()] = isValid;
       });
+    }
+    
+    // Determine which tools are enabled
+    let toolsToUse = [];
+    
+    if (chat.use_tools && chat.enabled_tools && chat.enabled_tools.length > 0) {
+      toolsToUse = chat.enabled_tools;
+    } else if (enabledTools && enabledTools.length > 0) {
+      toolsToUse = enabledTools;
+    }
+    
+    // Check if any tools require authentication
+    if (toolsToUse.length > 0) {
+      // Check if Gmail is in the enabled tools
+      const hasGmail = toolsToUse.some(tool => tool.toLowerCase().includes('gmail'));
+      
+      if (hasGmail) {
+        // Check if Gmail is authenticated
+        const isGmailAuthenticated = combinedAuthStatus['gmail'] === true;
+        
+        if (!isGmailAuthenticated) {
+          try {
+            // Try to set up Gmail authentication
+            const gmailAuthResult = await langchainService.setupUserConnectionIfNotExists(userId, 'gmail');
+            
+            if (gmailAuthResult.needsAuth) {
+              // Return the redirect URL to the client
+              return res.status(200).json({
+                needsAuth: true,
+                service: 'gmail',
+                redirectUrl: gmailAuthResult.redirectUrl,
+                message: 'Gmail authentication required'
+              });
+            }
+          } catch (authError) {
+            console.error('Error setting up Gmail authentication:', authError);
+            // Continue without Gmail tools
+            toolsToUse = toolsToUse.filter(tool => !tool.toLowerCase().includes('gmail'));
+          }
+        }
+      }
     }
     
     // Set up streaming response headers if streaming is requested
@@ -287,50 +328,90 @@ exports.sendMessage = async (req, res, next) => {
     
     try {
       // Determine if tools should be used
-      const useTools = chat.use_tools && chat.enabled_tools && chat.enabled_tools.length > 0;
+      const useTools = toolsToUse.length > 0;
       
       if (useTools) {
         // Use LangChain service for tool-enabled messages
-        console.log(`Processing message with tools: ${chat.enabled_tools.join(', ')}`);
+        console.log(`Processing message with tools: ${toolsToUse.join(', ')}`);
         
         if (stream) {
-          // Not implemented yet - tools with streaming
-          // For now, just use non-streaming approach and send the full response at once
-          const response = await langchainService.processMessage(
-            userId,
-            updatedMessages,
-            chat.enabled_tools,
-            combinedAuthStatus
-          );
-          
-          // Add assistant response to the database
-          const assistantMessage = {
-            ...response,
-            createdAt: new Date().toISOString()
-          };
-          
-          const finalMessages = [...updatedMessages, assistantMessage];
-          
-          // Update chat with assistant response
-          await supabase
-            .from('chats')
-            .update({
-              messages: finalMessages,
-              updated_at: new Date()
-            })
-            .eq('id', chatId)
-            .eq('user_id', userId);
-          
-          // Send the result as a single event
-          res.write(`data: ${JSON.stringify(assistantMessage)}\n\n`);
-          res.write('data: [DONE]\n\n');
-          res.end();
+          try {
+            // Use streaming with tools
+            const streamingResponse = await langchainService.getStreamingAgentResponse(
+              updatedMessages,
+              toolsToUse,
+              userId
+            );
+            
+            let finalContent = '';
+            
+            // Stream the response chunks
+            for await (const chunk of streamingResponse) {
+              finalContent = chunk.content;
+              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+            }
+            
+            // Add assistant response to the database
+            const assistantMessage = {
+              role: 'assistant',
+              content: finalContent,
+              createdAt: new Date().toISOString()
+            };
+            
+            const finalMessages = [...updatedMessages, assistantMessage];
+            
+            // Update chat with assistant response
+            await supabase
+              .from('chats')
+              .update({
+                messages: finalMessages,
+                updated_at: new Date()
+              })
+              .eq('id', chatId)
+              .eq('user_id', userId);
+            
+            res.write('data: [DONE]\n\n');
+            res.end();
+          } catch (streamError) {
+            console.error('Error streaming response with tools:', streamError);
+            
+            // Fallback to non-streaming approach
+            const response = await langchainService.processMessage(
+              userId,
+              updatedMessages,
+              toolsToUse,
+              combinedAuthStatus
+            );
+            
+            // Add assistant response to the database
+            const assistantMessage = {
+              ...response,
+              createdAt: new Date().toISOString()
+            };
+            
+            const finalMessages = [...updatedMessages, assistantMessage];
+            
+            // Update chat with assistant response
+            await supabase
+              .from('chats')
+              .update({
+                messages: finalMessages,
+                updated_at: new Date()
+              })
+              .eq('id', chatId)
+              .eq('user_id', userId);
+            
+            // Send the result as a single event
+            res.write(`data: ${JSON.stringify(assistantMessage)}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+          }
         } else {
           // Non-streaming approach with tools
           const response = await langchainService.processMessage(
             userId,
             updatedMessages,
-            chat.enabled_tools,
+            toolsToUse,
             combinedAuthStatus
           );
           

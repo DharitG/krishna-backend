@@ -20,21 +20,33 @@ class LangChainService {
   }
 
   async setupUserConnectionIfNotExists(entityId, appName) {
-    const entity = this.toolset.client.getEntity(entityId);
-    const connection = await entity.getConnection({ appName });
-    
-    if (!connection) {
-      // If this entity/user hasn't already connected the account
-      const newConnection = await entity.initiateConnection({ appName });
-      console.log(`Log in via: ${newConnection.redirectUrl}`);
-      return { 
-        redirectUrl: newConnection.redirectUrl,
-        needsAuth: true,
-        appName
-      };
+    if (!this.isConfigured) {
+      throw new Error('LangChain service not fully configured');
     }
     
-    return { needsAuth: false };
+    try {
+      // Create entity
+      const entity = this.toolset.client.getEntity(entityId);
+      
+      // Check if connection exists
+      const connection = await entity.getConnection({ appName });
+      
+      if (!connection) {
+        // If this entity/user hasn't already connected the account
+        const newConnection = await entity.initiateConnection({ appName });
+        console.log(`Log in via: ${newConnection.redirectUrl}`);
+        return { 
+          redirectUrl: newConnection.redirectUrl,
+          needsAuth: true,
+          appName
+        };
+      }
+      
+      return { needsAuth: false };
+    } catch (error) {
+      console.error(`Error setting up connection for ${appName}:`, error);
+      throw error;
+    }
   }
 
   async createAgent(userId, enabledTools = [], authStatus = {}) {
@@ -42,37 +54,42 @@ class LangChainService {
       throw new Error('LangChain service not fully configured');
     }
     
-    // Create entity and get tools
-    const entity = this.toolset.client.getEntity(userId);
-    
-    // Map enabledTools to Composio action format
-    const actions = enabledTools.map(tool => tool.toLowerCase());
-    
-    // Get tools from Composio
-    const tools = await this.toolset.getTools({ actions }, entity.id);
-    
-    // Create an agent with Azure OpenAI
-    const prompt = await pull("hwchase17/openai-functions-agent");
-    const llm = new ChatOpenAI({
-      azureOpenAIApiKey: this.apiKey,
-      azureOpenAIApiVersion: "2024-10-21",
-      azureOpenAIApiDeploymentName: process.env.AZURE_OPENAI_DEPLOYMENT_NAME,
-      azureOpenAIApiInstanceName: new URL(this.endpoint).hostname.split('.')[0],
-      temperature: 0.7,
-      systemMessage: AUGUST_SYSTEM_PROMPT,
-    });
-    
-    const agent = await createOpenAIFunctionsAgent({
-      llm,
-      tools,
-      prompt,
-    });
-    
-    return new AgentExecutor({
-      agent,
-      tools,
-      verbose: true,
-    });
+    try {
+      // Create entity
+      const entity = this.toolset.client.getEntity(userId);
+      
+      // Map enabledTools to Composio action format
+      const actions = enabledTools.map(tool => tool.toLowerCase());
+      
+      // Get tools from Composio
+      const tools = await this.toolset.getTools({ actions }, entity.id);
+      
+      // Create an agent with Azure OpenAI
+      const prompt = await pull("hwchase17/openai-functions-agent");
+      const llm = new ChatOpenAI({
+        azureOpenAIApiKey: this.apiKey,
+        azureOpenAIApiVersion: "2024-10-21",
+        azureOpenAIApiDeploymentName: process.env.AZURE_OPENAI_DEPLOYMENT_NAME,
+        azureOpenAIApiInstanceName: new URL(this.endpoint).hostname.split('.')[0],
+        temperature: 0.7,
+        systemMessage: AUGUST_SYSTEM_PROMPT,
+      });
+      
+      const agent = await createOpenAIFunctionsAgent({
+        llm,
+        tools,
+        prompt,
+      });
+      
+      return new AgentExecutor({
+        agent,
+        tools,
+        verbose: true,
+      });
+    } catch (error) {
+      console.error('Error creating agent:', error);
+      throw error;
+    }
   }
 
   async processMessage(userId, messages, enabledTools = [], authStatus = {}) {
@@ -131,81 +148,86 @@ class LangChainService {
       return openaiService.generateChatCompletionStream(messages);
     }
     
-    // Create entity and get tools
-    const entity = this.toolset.client.getEntity(userId);
-    
-    // Map enabledTools to Composio action format
-    const actions = enabledTools.map(tool => tool.toLowerCase());
-    
-    // Get tools from Composio
-    const tools = await this.toolset.getTools({ actions }, entity.id);
-    
-    // Create an agent with Azure OpenAI with streaming capability
-    const prompt = await pull("hwchase17/openai-functions-agent");
-    const llm = new ChatOpenAI({
-      azureOpenAIApiKey: this.apiKey,
-      azureOpenAIApiVersion: "2024-10-21",
-      azureOpenAIApiDeploymentName: process.env.AZURE_OPENAI_DEPLOYMENT_NAME,
-      azureOpenAIApiInstanceName: new URL(this.endpoint).hostname.split('.')[0],
-      temperature: 0.7,
-      streaming: true,
-      systemMessage: AUGUST_SYSTEM_PROMPT,
-    });
-    
-    const agent = await createOpenAIFunctionsAgent({
-      llm,
-      tools,
-      prompt,
-    });
-    
-    const agentExecutor = new AgentExecutor({
-      agent,
-      tools,
-      verbose: true,
-      returnIntermediateSteps: true,
-    });
-    
-    // Format messages for LangChain
-    const history = messages.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
-    
-    // Get the last user message
-    const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
-    
-    // Create a streaming response
-    const stream = await agentExecutor.streamEvents({
-      input: lastUserMessage.content,
-      chat_history: history.slice(0, -1) // Exclude the last message as it's the input
-    }, {
-      version: "v1",
-    });
-    
-    // Transform the stream to match our expected format
-    const transformedStream = {
-      async *[Symbol.asyncIterator]() {
-        let currentContent = '';
-        
-        for await (const event of stream) {
-          if (event.event === 'on_chat_model_stream' && event.data?.chunk?.content) {
-            currentContent += event.data.chunk.content;
-            yield { content: currentContent };
-          } else if (event.event === 'on_tool_start') {
-            yield { content: `\n\nUsing tool: ${event.name}...\n` };
-          } else if (event.event === 'on_tool_end') {
-            if (event.data?.output) {
-              const output = typeof event.data.output === 'object' 
-                ? JSON.stringify(event.data.output, null, 2) 
-                : event.data.output;
-              yield { content: `\nTool result: ${output}\n\n` };
+    try {
+      // Create entity and get tools
+      const entity = this.toolset.client.getEntity(userId);
+      
+      // Map enabledTools to Composio action format
+      const actions = enabledTools.map(tool => tool.toLowerCase());
+      
+      // Get tools from Composio
+      const tools = await this.toolset.getTools({ actions }, entity.id);
+      
+      // Create an agent with Azure OpenAI with streaming capability
+      const prompt = await pull("hwchase17/openai-functions-agent");
+      const llm = new ChatOpenAI({
+        azureOpenAIApiKey: this.apiKey,
+        azureOpenAIApiVersion: "2024-10-21",
+        azureOpenAIApiDeploymentName: process.env.AZURE_OPENAI_DEPLOYMENT_NAME,
+        azureOpenAIApiInstanceName: new URL(this.endpoint).hostname.split('.')[0],
+        temperature: 0.7,
+        streaming: true,
+        systemMessage: AUGUST_SYSTEM_PROMPT,
+      });
+      
+      const agent = await createOpenAIFunctionsAgent({
+        llm,
+        tools,
+        prompt,
+      });
+      
+      const agentExecutor = new AgentExecutor({
+        agent,
+        tools,
+        verbose: true,
+        returnIntermediateSteps: true,
+      });
+      
+      // Format messages for LangChain
+      const history = messages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      
+      // Get the last user message
+      const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
+      
+      // Create a streaming response
+      const stream = await agentExecutor.streamEvents({
+        input: lastUserMessage.content,
+        chat_history: history.slice(0, -1) // Exclude the last message as it's the input
+      }, {
+        version: "v1",
+      });
+      
+      // Transform the stream to match our expected format
+      const transformedStream = {
+        async *[Symbol.asyncIterator]() {
+          let currentContent = '';
+          
+          for await (const event of stream) {
+            if (event.event === 'on_chat_model_stream' && event.data?.chunk?.content) {
+              currentContent += event.data.chunk.content;
+              yield { content: currentContent };
+            } else if (event.event === 'on_tool_start') {
+              yield { content: `\n\nUsing tool: ${event.name}...\n` };
+            } else if (event.event === 'on_tool_end') {
+              if (event.data?.output) {
+                const output = typeof event.data.output === 'object' 
+                  ? JSON.stringify(event.data.output, null, 2) 
+                  : event.data.output;
+                yield { content: `\nTool result: ${output}\n\n` };
+              }
             }
           }
         }
-      }
-    };
-    
-    return transformedStream;
+      };
+      
+      return transformedStream;
+    } catch (error) {
+      console.error('Error getting streaming agent response:', error);
+      throw error;
+    }
   }
 }
 

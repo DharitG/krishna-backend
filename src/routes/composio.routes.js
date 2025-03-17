@@ -12,7 +12,10 @@ router.get('/test', (req, res) => {
 router.post('/auth/init/:service', requireAuth, composioController.initAuthentication);
 
 // Complete authentication process - no auth required for callback
-router.get('/auth/callback/:service', composioController.completeAuthentication);
+router.get('/auth/callback', composioController.completeAuthentication);
+
+// Check authentication status for a specific service
+router.get('/auth/status/:service', requireAuth, composioController.checkAuth);
 
 // Check authentication requirements for tools
 router.post('/auth/check', requireAuth, composioController.checkToolAuth);

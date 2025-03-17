@@ -10,8 +10,17 @@ exports.initAuthentication = async (req, res, next) => {
     const userId = req.user.id;
     const { service } = req.params;
     
+    // Validate service name
+    if (!service) {
+      return res.status(400).json({ error: 'Service name is required' });
+    }
+    
     // Initialize authentication with Composio
     const authInfo = await composioService.initAuthentication(service, userId);
+    
+    if (authInfo.error) {
+      return res.status(400).json({ error: authInfo.error });
+    }
     
     res.json({
       service,
@@ -19,6 +28,7 @@ exports.initAuthentication = async (req, res, next) => {
       status: 'pending'
     });
   } catch (error) {
+    console.error(`Error initializing ${req.params.service} authentication:`, error);
     next(error);
   }
 };
@@ -30,18 +40,27 @@ exports.completeAuthentication = async (req, res, next) => {
   try {
     const { code, state, service } = req.query;
     
+    // Validate required parameters
+    if (!code || !state || !service) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+    
     // The state parameter contains the user ID
     const userId = state;
     
     // Complete authentication with Composio
     const authResult = await composioService.completeAuthentication(service, code);
     
+    if (authResult.error) {
+      return res.status(400).json({ error: authResult.error });
+    }
+    
     // Save token to database
     const { error } = await supabase
       .from('service_tokens')
       .upsert({
         user_id: userId,
-        service_name: service,
+        service_name: service.toLowerCase(),
         access_token: authResult.accessToken,
         refresh_token: authResult.refreshToken,
         expires_at: authResult.expiresAt,
@@ -50,17 +69,16 @@ exports.completeAuthentication = async (req, res, next) => {
       });
     
     if (error) {
-      console.error('Error saving service token:', error);
-      throw new Error(`Failed to save ${service} authentication: ${error.message}`);
+      console.error('Error saving token to database:', error);
+      return res.status(500).json({ error: 'Failed to save authentication token' });
     }
     
-    // Redirect to app with success message
-    res.redirect(`${process.env.APP_URL}/auth-callback?service=${service}&status=success`);
+    // Redirect to frontend with success message
+    res.redirect(`${process.env.APP_URL}/auth-success?service=${service}`);
   } catch (error) {
     console.error(`Error completing authentication:`, error);
-    
-    // Redirect to app with error message
-    res.redirect(`${process.env.APP_URL}/auth-callback?service=${req.query.service}&status=error&message=${encodeURIComponent(error.message)}`);
+    // Redirect to frontend with error message
+    res.redirect(`${process.env.APP_URL}/auth-error?message=${encodeURIComponent(error.message)}`);
   }
 };
 
@@ -69,9 +87,18 @@ exports.completeAuthentication = async (req, res, next) => {
  */
 exports.getTools = async (req, res, next) => {
   try {
-    const tools = await composioService.getTools();
+    const { actions } = req.query;
+    const userId = req.user.id;
+    
+    // Parse actions if provided
+    const actionsList = actions ? actions.split(',') : [];
+    
+    // Get tools from Composio
+    const tools = await composioService.getTools(actionsList, userId);
+    
     res.json({ tools });
   } catch (error) {
+    console.error('Error fetching tools:', error);
     next(error);
   }
 };
@@ -84,16 +111,16 @@ exports.executeToolCall = async (req, res, next) => {
     const userId = req.user.id;
     const { messages, enabledTools = [], stream = false, authStatus = {} } = req.body;
     
-    // If there are no messages, return an error
+    // Validate required parameters
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ message: 'No messages provided' });
+      return res.status(400).json({ error: 'No messages provided' });
     }
-
+    
     // Get the last user message
     const lastUserMessage = messages.filter(m => m.role === 'user').pop();
     
     if (!lastUserMessage) {
-      return res.status(400).json({ message: 'No user message found in the provided messages' });
+      return res.status(400).json({ error: 'No user message found in the provided messages' });
     }
     
     // Check if tools are needed/enabled
@@ -224,6 +251,33 @@ exports.checkToolAuth = async (req, res, next) => {
     
     res.json({ authRequirements: authResults });
   } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Check authentication status for a service
+ */
+exports.checkAuth = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { service } = req.params;
+    
+    // Validate service name
+    if (!service) {
+      return res.status(400).json({ error: 'Service name is required' });
+    }
+    
+    // Check authentication status with Composio
+    const authStatus = await composioService.checkAuthentication(service, userId);
+    
+    res.json({
+      service,
+      authenticated: authStatus.authenticated,
+      status: authStatus.status
+    });
+  } catch (error) {
+    console.error(`Error checking authentication for ${req.params.service}:`, error);
     next(error);
   }
 };
