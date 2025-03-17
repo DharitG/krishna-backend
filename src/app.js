@@ -19,12 +19,14 @@ const userRoutes = require('./routes/user.routes');
 const composioRoutes = require('./routes/composio.routes');
 const preferencesRoutes = require('./routes/preferences.routes');
 const chatRoutes = require('./routes/chat.routes');
+const accountRoutes = require('./routes/account.routes');
 
 // Register routes
 app.use('/api/user', requireAuth, userRoutes);
 app.use('/api/composio', requireAuth, composioRoutes);
 app.use('/api/preferences', requireAuth, preferencesRoutes);
 app.use('/api/chats', requireAuth, chatRoutes);
+app.use('/api/accounts', requireAuth, accountRoutes);
 
 // Public test endpoint (no auth required)
 app.get('/api/test', (req, res) => {
