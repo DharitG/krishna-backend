@@ -6,6 +6,7 @@ const { Server } = require('socket.io');
 const { testConnection } = require('./services/supabase');
 const { authenticateSocket } = require('./middleware/socket.middleware');
 const { handleChatSocket } = require('./socket/chat.socket');
+const { handleVoiceSocket } = require('./socket/voice.socket');
 
 // Create HTTP server
 const server = http.createServer(app);
@@ -27,6 +28,9 @@ io.on('connection', (socket) => {
   
   // Register chat socket handlers
   handleChatSocket(io, socket);
+  
+  // Register voice socket handlers
+  handleVoiceSocket(io, socket);
   
   socket.on('disconnect', () => {
     console.log(`Socket disconnected: ${socket.id}`);

@@ -113,6 +113,97 @@ class LangChainService {
       throw error;
     }
   }
+
+  async getStreamingAgentResponse(messages, enabledTools = [], userId = 'default-user') {
+    if (!this.isConfigured) {
+      throw new Error('LangChain service is not configured');
+    }
+
+    // Check if tools are actually needed
+    const useTools = enabledTools && enabledTools.length > 0;
+    
+    if (!useTools) {
+      // If no tools are needed, use the OpenAI service directly
+      console.log('No tools needed, using OpenAI service directly');
+      const openaiService = require('./openai.service');
+      return openaiService.generateChatCompletionStream(messages);
+    }
+    
+    // Create entity and get tools
+    const entity = this.toolset.client.getEntity(userId);
+    
+    // Map enabledTools to Composio action format
+    const actions = enabledTools.map(tool => tool.toLowerCase());
+    
+    // Get tools from Composio
+    const tools = await this.toolset.getTools({ actions }, entity.id);
+    
+    // Create an agent with Azure OpenAI with streaming capability
+    const prompt = await pull("hwchase17/openai-functions-agent");
+    const llm = new ChatOpenAI({
+      azureOpenAIApiKey: this.apiKey,
+      azureOpenAIApiVersion: "2024-10-21",
+      azureOpenAIApiDeploymentName: process.env.AZURE_OPENAI_DEPLOYMENT_NAME,
+      azureOpenAIApiInstanceName: new URL(this.endpoint).hostname.split('.')[0],
+      temperature: 0.7,
+      streaming: true,
+    });
+    
+    const agent = await createOpenAIFunctionsAgent({
+      llm,
+      tools,
+      prompt,
+    });
+    
+    const agentExecutor = new AgentExecutor({
+      agent,
+      tools,
+      verbose: true,
+      returnIntermediateSteps: true,
+    });
+    
+    // Format messages for LangChain
+    const history = messages.map(msg => ({
+      role: msg.role,
+      content: msg.content
+    }));
+    
+    // Get the last user message
+    const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
+    
+    // Create a streaming response
+    const stream = await agentExecutor.streamEvents({
+      input: lastUserMessage.content,
+      chat_history: history.slice(0, -1) // Exclude the last message as it's the input
+    }, {
+      version: "v1",
+    });
+    
+    // Transform the stream to match our expected format
+    const transformedStream = {
+      async *[Symbol.asyncIterator]() {
+        let currentContent = '';
+        
+        for await (const event of stream) {
+          if (event.event === 'on_chat_model_stream' && event.data?.chunk?.content) {
+            currentContent += event.data.chunk.content;
+            yield { content: currentContent };
+          } else if (event.event === 'on_tool_start') {
+            yield { content: `\n\nUsing tool: ${event.name}...\n` };
+          } else if (event.event === 'on_tool_end') {
+            if (event.data?.output) {
+              const output = typeof event.data.output === 'object' 
+                ? JSON.stringify(event.data.output, null, 2) 
+                : event.data.output;
+              yield { content: `\nTool result: ${output}\n\n` };
+            }
+          }
+        }
+      }
+    };
+    
+    return transformedStream;
+  }
 }
 
 module.exports = new LangChainService();
