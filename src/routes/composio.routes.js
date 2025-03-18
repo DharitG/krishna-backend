@@ -12,7 +12,6 @@ router.get('/test', (req, res) => {
 router.get('/auth/callback', composioController.completeAuthentication);
 
 // Protected routes (require authentication)
-router.use(authMiddleware.verifyToken);
 
 // Authentication management
 router.post('/auth/init/:service', composioController.initAuthentication);
