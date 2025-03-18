@@ -220,12 +220,13 @@ exports.executeToolCall = async (req, res, next) => {
             for await (const chunk of streamingResponse) {
               // Check if this chunk has an auth request
               if (chunk.requiresAuth) {
-                // Send the auth request as a special event
+                // Send the auth request as a special event with all properties
                 res.write(`data: ${JSON.stringify({
                   role: 'assistant',
                   content: chunk.content,
                   requiresAuth: true,
-                  service: chunk.service
+                  service: chunk.service,
+                  authRequestTag: chunk.authRequestTag
                 })}\n\n`);
               } else {
                 // Send regular content chunk
