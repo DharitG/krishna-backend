@@ -109,9 +109,58 @@ exports.getTools = async (req, res, next) => {
 exports.executeToolCall = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { messages, enabledTools = [], stream = false, authStatus = {} } = req.body;
+    const { messages, enabledTools = [], stream = false, authStatus = {}, toolCalls = null } = req.body;
     
-    // Validate required parameters
+    // If specific tool calls are provided, process them directly
+    if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
+      try {
+        // Get service tokens for authentication status
+        const { data: serviceTokens, error: tokensError } = await supabase
+          .from('service_tokens')
+          .select('service_name, access_token, expires_at')
+          .eq('user_id', userId);
+        
+        // Process auth status
+        const combinedAuthStatus = { ...authStatus };
+        const now = new Date();
+        
+        if (serviceTokens) {
+          serviceTokens.forEach(token => {
+            const isValid = token.expires_at ? new Date(token.expires_at) > now : false;
+            combinedAuthStatus[token.service_name.toLowerCase()] = isValid;
+          });
+        }
+        
+        // Process the tool calls
+        const processedResult = await langchainService.processToolCalls(toolCalls, combinedAuthStatus, userId);
+        
+        if (processedResult.requiresAuth) {
+          // Tool requires authentication
+          return res.json({
+            role: 'assistant',
+            content: `${processedResult.authRequestTag} ${processedResult.message}`,
+            requiresAuth: true,
+            service: processedResult.service
+          });
+        }
+        
+        // Tool execution successful
+        return res.json({
+          role: 'assistant',
+          content: `I've completed the action successfully. ${processedResult.result.output || ''}`,
+          toolResult: processedResult.result
+        });
+      } catch (error) {
+        console.error('Error processing tool calls:', error);
+        return res.status(500).json({
+          role: 'assistant',
+          content: 'Sorry, I encountered an error while trying to perform that action. Please try again later.',
+          error: error.message
+        });
+      }
+    }
+    
+    // Validate required parameters for regular message processing
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'No messages provided' });
     }
@@ -140,27 +189,77 @@ exports.executeToolCall = async (req, res, next) => {
       if (useTools) {
         console.log(`Processing message with tools enabled: ${enabledTools.join(', ')}`);
         
+        // Get service tokens for authentication status
+        const { data: serviceTokens, error: tokensError } = await supabase
+          .from('service_tokens')
+          .select('service_name, access_token, expires_at')
+          .eq('user_id', userId);
+        
+        // Process auth status
+        const combinedAuthStatus = { ...authStatus };
+        const now = new Date();
+        
+        if (serviceTokens) {
+          serviceTokens.forEach(token => {
+            const isValid = token.expires_at ? new Date(token.expires_at) > now : false;
+            combinedAuthStatus[token.service_name.toLowerCase()] = isValid;
+          });
+        }
+        
         if (stream) {
-          // Not implemented yet - tools with streaming
-          // For now, just use non-streaming approach and send the full response at once
-          const result = await langchainService.processMessage(
-            userId,
-            messages, 
-            enabledTools,
-            authStatus
-          );
-          
-          // Send the result as a single event
-          res.write(`data: ${JSON.stringify(result)}\n\n`);
-          res.write('data: [DONE]\n\n');
-          res.end();
+          try {
+            // Use streaming with tools
+            const streamingResponse = await langchainService.getStreamingAgentResponse(
+              messages,
+              enabledTools,
+              userId,
+              combinedAuthStatus
+            );
+            
+            // Stream the response chunks
+            for await (const chunk of streamingResponse) {
+              // Check if this chunk has an auth request
+              if (chunk.requiresAuth) {
+                // Send the auth request as a special event
+                res.write(`data: ${JSON.stringify({
+                  role: 'assistant',
+                  content: chunk.content,
+                  requiresAuth: true,
+                  service: chunk.service
+                })}\n\n`);
+              } else {
+                // Send regular content chunk
+                res.write(`data: ${JSON.stringify({
+                  role: 'assistant',
+                  content: chunk.content
+                })}\n\n`);
+              }
+            }
+            
+            // Signal the end of the stream
+            res.write('data: [DONE]\n\n');
+            res.end();
+          } catch (error) {
+            console.error('Error streaming response with tools:', error);
+            
+            // Send error as an event
+            const errorMessage = {
+              role: 'assistant',
+              content: 'Sorry, I encountered an error while processing your request. Please try again later.',
+              error: true
+            };
+            
+            res.write(`data: ${JSON.stringify(errorMessage)}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+          }
         } else {
           // Non-streaming approach with tools
           const result = await langchainService.processMessage(
             userId,
             messages, 
             enabledTools,
-            authStatus
+            combinedAuthStatus
           );
           return res.json(result);
         }
@@ -200,22 +299,22 @@ exports.executeToolCall = async (req, res, next) => {
         // Send error as an event
         const errorMessage = {
           role: 'assistant',
-          content: `Error: ${error.message || 'Unknown error occurred'}`,
+          content: 'Sorry, I encountered an error while processing your request. Please try again later.',
           error: true
         };
+        
         res.write(`data: ${JSON.stringify(errorMessage)}\n\n`);
         res.write('data: [DONE]\n\n');
         res.end();
       } else if (!stream) {
-        // Regular error response
-        return res.status(500).json({ 
-          message: 'Error processing message', 
-          error: error.message || 'Unknown error' 
+        return res.status(500).json({
+          role: 'assistant',
+          content: 'Sorry, I encountered an error while processing your request. Please try again later.',
+          error: true
         });
       }
     }
   } catch (error) {
-    console.error('Error in executeToolCall:', error);
     next(error);
   }
 };
@@ -228,29 +327,54 @@ exports.checkToolAuth = async (req, res, next) => {
     const userId = req.user.id;
     const { tools } = req.body;
     
-    const authResults = [];
-    
-    for (const tool of tools) {
-      // Extract service name from tool (e.g., "GITHUB_CREATE_ISSUE" -> "GITHUB")
-      const serviceName = tool.split('_')[0].toUpperCase();
-      
-      // Check if authentication is needed
-      const authResult = await langchainService.setupUserConnectionIfNotExists(
-        userId, 
-        serviceName
-      );
-      
-      if (authResult.needsAuth) {
-        authResults.push({
-          service: serviceName,
-          redirectUrl: authResult.redirectUrl,
-          status: 'pending'
-        });
-      }
+    if (!tools || !Array.isArray(tools) || tools.length === 0) {
+      return res.status(400).json({ error: 'No tools specified' });
     }
     
-    res.json({ authRequirements: authResults });
+    // Get service tokens for authentication status
+    const { data: serviceTokens, error: tokensError } = await supabase
+      .from('service_tokens')
+      .select('service_name, access_token, expires_at')
+      .eq('user_id', userId);
+    
+    // Process auth status
+    const authStatus = {};
+    const now = new Date();
+    
+    if (serviceTokens) {
+      serviceTokens.forEach(token => {
+        const isValid = token.expires_at ? new Date(token.expires_at) > now : false;
+        authStatus[token.service_name.toLowerCase()] = isValid;
+      });
+    }
+    
+    // Check each tool for auth requirements
+    const results = {};
+    
+    for (const tool of tools) {
+      // Create a mock tool call to check auth requirements
+      const mockToolCall = {
+        function: {
+          name: tool,
+          arguments: '{}'
+        }
+      };
+      
+      const authCheck = await langchainService.checkToolAuthRequirement(mockToolCall, authStatus);
+      
+      results[tool] = {
+        needsAuth: authCheck.needsAuth,
+        service: authCheck.service || null,
+        isAuthenticated: !authCheck.needsAuth
+      };
+    }
+    
+    res.json({
+      authStatus,
+      toolAuthRequirements: results
+    });
   } catch (error) {
+    console.error('Error checking tool auth requirements:', error);
     next(error);
   }
 };
@@ -268,16 +392,58 @@ exports.checkAuth = async (req, res, next) => {
       return res.status(400).json({ error: 'Service name is required' });
     }
     
-    // Check authentication status with Composio
-    const authStatus = await composioService.checkAuthentication(service, userId);
+    // Check if the user has a token for this service
+    const { data: token, error } = await supabase
+      .from('service_tokens')
+      .select('access_token, refresh_token, expires_at')
+      .eq('user_id', userId)
+      .eq('service_name', service.toLowerCase())
+      .single();
     
-    res.json({
+    if (error || !token) {
+      return res.json({
+        authenticated: false,
+        service,
+        message: 'Not authenticated'
+      });
+    }
+    
+    // Check if the token is expired
+    const now = new Date();
+    const expiresAt = token.expires_at ? new Date(token.expires_at) : null;
+    const isExpired = expiresAt && expiresAt <= now;
+    
+    if (isExpired) {
+      // Token is expired, try to refresh it
+      try {
+        // This is a placeholder for token refresh logic
+        // In a real implementation, you would use the refresh_token to get a new access_token
+        // For now, we'll just return that the token is expired
+        return res.json({
+          authenticated: false,
+          service,
+          message: 'Token expired',
+          needsReauth: true
+        });
+      } catch (refreshError) {
+        console.error('Error refreshing token:', refreshError);
+        return res.json({
+          authenticated: false,
+          service,
+          message: 'Token expired and refresh failed',
+          needsReauth: true
+        });
+      }
+    }
+    
+    // Token is valid
+    return res.json({
+      authenticated: true,
       service,
-      authenticated: authStatus.authenticated,
-      status: authStatus.status
+      message: 'Authenticated'
     });
   } catch (error) {
-    console.error(`Error checking authentication for ${req.params.service}:`, error);
+    console.error(`Error checking ${req.params.service} authentication:`, error);
     next(error);
   }
 };

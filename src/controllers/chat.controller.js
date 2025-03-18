@@ -1,6 +1,7 @@
 const { supabase } = require('../services/supabase');
 const openaiService = require('../services/openai.service');
 const langchainService = require('../services/langchain.service');
+const composioService = require('../services/composio.service');
 
 /**
  * Get all chats for the current user
@@ -200,334 +201,134 @@ exports.deleteChat = async (req, res, next) => {
 exports.sendMessage = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { chatId } = req.params;
-    const { content, messages, enabledTools = [], stream = false, authStatus = {} } = req.body;
+    const { messages, enabledTools = [], stream = false, authStatus = {} } = req.body;
     
-    // Get chat
-    const { data: chat, error: chatError } = await supabase
-      .from('chats')
-      .select('*')
-      .eq('id', chatId)
-      .eq('user_id', userId)
-      .single();
-    
-    if (chatError) {
-      console.error('Error fetching chat:', chatError);
-      return res.status(404).json({ message: 'Chat not found', error: chatError.message });
+    // Validate required parameters
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'No messages provided' });
     }
     
-    // Handle both formats - either content directly or messages array
-    let userMessage;
-    let existingMessages;
+    // Get the last user message
+    const lastUserMessage = messages.filter(m => m.role === 'user').pop();
     
-    if (messages && Array.isArray(messages)) {
-      // If messages array is provided, use the last user message
-      userMessage = messages.filter(m => m.role === 'user').pop();
-      // Use the provided messages array
-      existingMessages = chat.messages;
-    } else if (content) {
-      // Create user message from content
-      userMessage = {
-        role: 'user',
-        content,
-        createdAt: new Date().toISOString()
-      };
-      // Use existing messages from the chat
-      existingMessages = chat.messages;
-    } else {
-      return res.status(400).json({ message: 'No message content provided' });
+    if (!lastUserMessage) {
+      return res.status(400).json({ error: 'No user message found in the provided messages' });
     }
     
-    // Add user message to existing messages if not already included
-    const messageExists = existingMessages.some(m => 
-      m.role === userMessage.role && 
-      m.content === userMessage.content &&
-      m.createdAt === userMessage.createdAt
-    );
-    
-    const updatedMessages = messageExists 
-      ? existingMessages 
-      : [...existingMessages, userMessage];
-    
-    // Update chat with user message
-    await supabase
-      .from('chats')
-      .update({
-        messages: updatedMessages,
-        updated_at: new Date()
-      })
-      .eq('id', chatId)
-      .eq('user_id', userId);
-    
-    // Get service tokens for authentication status
-    const { data: serviceTokens, error: tokensError } = await supabase
-      .from('service_tokens')
-      .select('service_name, access_token, expires_at')
-      .eq('user_id', userId);
-    
-    // Process auth status
-    const combinedAuthStatus = { ...authStatus };
-    const now = new Date();
-    
-    if (serviceTokens) {
-      serviceTokens.forEach(token => {
-        const isValid = token.expires_at ? new Date(token.expires_at) > now : false;
-        combinedAuthStatus[token.service_name.toLowerCase()] = isValid;
-      });
-    }
-    
-    // Determine which tools are enabled
-    let toolsToUse = [];
-    
-    if (chat.use_tools && chat.enabled_tools && chat.enabled_tools.length > 0) {
-      toolsToUse = chat.enabled_tools;
-    } else if (enabledTools && enabledTools.length > 0) {
-      toolsToUse = enabledTools;
-    }
-    
-    // Check if any tools require authentication
-    if (toolsToUse.length > 0) {
-      // Check if Gmail is in the enabled tools
-      const hasGmail = toolsToUse.some(tool => tool.toLowerCase().includes('gmail'));
-      
-      if (hasGmail) {
-        // Check if Gmail is authenticated
-        const isGmailAuthenticated = combinedAuthStatus['gmail'] === true;
-        
-        if (!isGmailAuthenticated) {
-          try {
-            // Try to set up Gmail authentication
-            const gmailAuthResult = await langchainService.setupUserConnectionIfNotExists(userId, 'gmail');
-            
-            if (gmailAuthResult.needsAuth) {
-              // Return the redirect URL to the client
-              return res.status(200).json({
-                needsAuth: true,
-                service: 'gmail',
-                redirectUrl: gmailAuthResult.redirectUrl,
-                message: 'Gmail authentication required'
-              });
-            }
-          } catch (authError) {
-            console.error('Error setting up Gmail authentication:', authError);
-            // Continue without Gmail tools
-            toolsToUse = toolsToUse.filter(tool => !tool.toLowerCase().includes('gmail'));
-          }
-        }
-      }
-    }
-    
-    // Set up streaming response headers if streaming is requested
-    if (stream) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.flushHeaders(); // Flush the headers to establish SSE with client
-    }
+    // Check if tools are needed/enabled
+    const useTools = enabledTools && enabledTools.length > 0;
     
     try {
-      // Determine if tools should be used
-      const useTools = toolsToUse.length > 0;
+      // Set up streaming response headers if streaming is requested
+      if (stream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.flushHeaders(); // Flush the headers to establish SSE with client
+      }
       
+      // Only use LangChain agent if tools are enabled
       if (useTools) {
-        // Use LangChain service for tool-enabled messages
-        console.log(`Processing message with tools: ${toolsToUse.join(', ')}`);
+        console.log(`Processing message with tools enabled: ${enabledTools.join(', ')}`);
+        
+        // Get service tokens for authentication status
+        const { data: serviceTokens, error: tokensError } = await supabase
+          .from('service_tokens')
+          .select('service_name, access_token, expires_at')
+          .eq('user_id', userId);
+        
+        // Process auth status
+        const combinedAuthStatus = { ...authStatus };
+        const now = new Date();
+        
+        if (serviceTokens) {
+          serviceTokens.forEach(token => {
+            const isValid = token.expires_at ? new Date(token.expires_at) > now : false;
+            combinedAuthStatus[token.service_name.toLowerCase()] = isValid;
+          });
+        }
         
         if (stream) {
           try {
             // Use streaming with tools
             const streamingResponse = await langchainService.getStreamingAgentResponse(
-              updatedMessages,
-              toolsToUse,
-              userId
-            );
-            
-            let finalContent = '';
-            
-            // Stream the response chunks
-            for await (const chunk of streamingResponse) {
-              finalContent = chunk.content;
-              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-            }
-            
-            // Add assistant response to the database
-            const assistantMessage = {
-              role: 'assistant',
-              content: finalContent,
-              createdAt: new Date().toISOString()
-            };
-            
-            const finalMessages = [...updatedMessages, assistantMessage];
-            
-            // Update chat with assistant response
-            await supabase
-              .from('chats')
-              .update({
-                messages: finalMessages,
-                updated_at: new Date()
-              })
-              .eq('id', chatId)
-              .eq('user_id', userId);
-            
-            res.write('data: [DONE]\n\n');
-            res.end();
-          } catch (streamError) {
-            console.error('Error streaming response with tools:', streamError);
-            
-            // Fallback to non-streaming approach
-            const response = await langchainService.processMessage(
+              messages,
+              enabledTools,
               userId,
-              updatedMessages,
-              toolsToUse,
               combinedAuthStatus
             );
             
-            // Add assistant response to the database
-            const assistantMessage = {
-              ...response,
-              createdAt: new Date().toISOString()
+            // Stream the response chunks
+            for await (const chunk of streamingResponse) {
+              // Check if this chunk has an auth request
+              if (chunk.requiresAuth) {
+                // Send the auth request as a special event
+                res.write(`data: ${JSON.stringify({
+                  role: 'assistant',
+                  content: chunk.content,
+                  requiresAuth: true,
+                  service: chunk.service
+                })}\n\n`);
+              } else {
+                // Send regular content chunk
+                res.write(`data: ${JSON.stringify({
+                  role: 'assistant',
+                  content: chunk.content
+                })}\n\n`);
+              }
+            }
+            
+            // Signal the end of the stream
+            res.write('data: [DONE]\n\n');
+            res.end();
+          } catch (error) {
+            console.error('Error streaming response with tools:', error);
+            
+            // Send error as an event
+            const errorMessage = {
+              role: 'assistant',
+              content: 'Sorry, I encountered an error while processing your request. Please try again later.',
+              error: true
             };
             
-            const finalMessages = [...updatedMessages, assistantMessage];
-            
-            // Update chat with assistant response
-            await supabase
-              .from('chats')
-              .update({
-                messages: finalMessages,
-                updated_at: new Date()
-              })
-              .eq('id', chatId)
-              .eq('user_id', userId);
-            
-            // Send the result as a single event
-            res.write(`data: ${JSON.stringify(assistantMessage)}\n\n`);
+            res.write(`data: ${JSON.stringify(errorMessage)}\n\n`);
             res.write('data: [DONE]\n\n');
             res.end();
           }
         } else {
           // Non-streaming approach with tools
-          const response = await langchainService.processMessage(
+          const result = await langchainService.processMessage(
             userId,
-            updatedMessages,
-            toolsToUse,
+            messages, 
+            enabledTools,
             combinedAuthStatus
           );
-          
-          // Add assistant response
-          const assistantMessage = {
-            ...response,
-            createdAt: new Date().toISOString()
-          };
-          
-          const finalMessages = [...updatedMessages, assistantMessage];
-          
-          // Update chat with assistant response
-          const updates = {
-            messages: finalMessages,
-            updated_at: new Date()
-          };
-          
-          // Update chat title if this is the first user message
-          if (updatedMessages.filter(m => m.role === 'user').length === 1) {
-            updates.title = userMessage.content.substring(0, 40) + (userMessage.content.length > 40 ? '...' : '');
-          }
-          
-          await supabase
-            .from('chats')
-            .update(updates)
-            .eq('id', chatId)
-            .eq('user_id', userId);
-          
-          res.json(assistantMessage);
+          return res.json(result);
         }
       } else {
-        // Use direct OpenAI service for regular messages
+        // For simple messages without tools, use a more direct approach
         console.log('Processing message without tools');
-        const openaiService = require('../services/openai.service');
         
         if (stream) {
           // Use streaming approach
           console.log('Using streaming response');
-          
-          // Create a temporary message to store the full response
-          let assistantMessage = {
-            role: 'assistant',
-            content: '',
-            createdAt: new Date().toISOString()
-          };
-          
-          // Stream the response
-          await openaiService.generateChatCompletionStream(updatedMessages, (chunk) => {
-            // Update the full message content
-            assistantMessage.content = chunk.content;
-            
+          await openaiService.generateChatCompletionStream(messages, (chunk) => {
             // Send each chunk as an SSE event
-            res.write(`data: ${JSON.stringify({
-              role: 'assistant',
-              content: chunk.content,
-              createdAt: assistantMessage.createdAt
-            })}\n\n`);
+            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
           });
-          
-          // Save the complete message to the database
-          const finalMessages = [...updatedMessages, assistantMessage];
-          
-          // Update chat with assistant response
-          const updates = {
-            messages: finalMessages,
-            updated_at: new Date()
-          };
-          
-          // Update chat title if this is the first user message
-          if (updatedMessages.filter(m => m.role === 'user').length === 1) {
-            updates.title = userMessage.content.substring(0, 40) + (userMessage.content.length > 40 ? '...' : '');
-          }
-          
-          await supabase
-            .from('chats')
-            .update(updates)
-            .eq('id', chatId)
-            .eq('user_id', userId);
           
           // Signal the end of the stream
           res.write('data: [DONE]\n\n');
           res.end();
         } else {
           // Use non-streaming approach
-          const response = await openaiService.generateChatCompletion(updatedMessages);
-          
-          // Add assistant response
-          const assistantMessage = {
-            ...response,
-            createdAt: new Date().toISOString()
-          };
-          
-          const finalMessages = [...updatedMessages, assistantMessage];
-          
-          // Update chat with assistant response
-          const updates = {
-            messages: finalMessages,
-            updated_at: new Date()
-          };
-          
-          // Update chat title if this is the first user message
-          if (updatedMessages.filter(m => m.role === 'user').length === 1) {
-            updates.title = userMessage.content.substring(0, 40) + (userMessage.content.length > 40 ? '...' : '');
-          }
-          
-          await supabase
-            .from('chats')
-            .update(updates)
-            .eq('id', chatId)
-            .eq('user_id', userId);
-          
-          res.json(assistantMessage);
+          const result = await openaiService.generateChatCompletion(messages);
+          return res.json(result);
         }
       }
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error processing message:', error);
       
       // Handle errors differently for streaming vs non-streaming
       if (stream && !res.headersSent) {
@@ -537,48 +338,22 @@ exports.sendMessage = async (req, res, next) => {
       }
       
       if (stream && !res.finished) {
-        // Add error message
+        // Send error as an event
         const errorMessage = {
           role: 'assistant',
-          content: 'Sorry, I encountered an error. Please try again later.',
-          error: true,
-          createdAt: new Date().toISOString()
+          content: 'Sorry, I encountered an error while processing your request. Please try again later.',
+          error: true
         };
         
-        // Update chat with error message
-        await supabase
-          .from('chats')
-          .update({
-            messages: [...updatedMessages, errorMessage],
-            updated_at: new Date()
-          })
-          .eq('id', chatId)
-          .eq('user_id', userId);
-        
-        // Send error as an event
         res.write(`data: ${JSON.stringify(errorMessage)}\n\n`);
         res.write('data: [DONE]\n\n');
         res.end();
       } else if (!stream) {
-        // Add error message
-        const errorMessage = {
+        return res.status(500).json({
           role: 'assistant',
-          content: 'Sorry, I encountered an error. Please try again later.',
-          error: true,
-          createdAt: new Date().toISOString()
-        };
-        
-        // Update chat with error message
-        await supabase
-          .from('chats')
-          .update({
-            messages: [...updatedMessages, errorMessage],
-            updated_at: new Date()
-          })
-          .eq('id', chatId)
-          .eq('user_id', userId);
-        
-        res.status(500).json(errorMessage);
+          content: 'Sorry, I encountered an error while processing your request. Please try again later.',
+          error: true
+        });
       }
     }
   } catch (error) {
@@ -608,6 +383,192 @@ exports.getChatMessages = async (req, res, next) => {
     }
     
     res.json(chat.messages);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Save a message to the database
+ */
+exports.saveMessage = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { message, conversationId } = req.body;
+    
+    // Validate required parameters
+    if (!message || !message.role || !message.content) {
+      return res.status(400).json({ error: 'Invalid message format' });
+    }
+    
+    if (!conversationId) {
+      return res.status(400).json({ error: 'Conversation ID is required' });
+    }
+    
+    // Save message to database
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        user_id: userId,
+        conversation_id: conversationId,
+        role: message.role,
+        content: message.content,
+        created_at: new Date()
+      })
+      .select();
+    
+    if (error) {
+      console.error('Error saving message:', error);
+      return res.status(500).json({ error: 'Failed to save message' });
+    }
+    
+    res.json({ message: data[0] });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get messages for a conversation
+ */
+exports.getMessages = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { conversationId } = req.params;
+    
+    // Validate required parameters
+    if (!conversationId) {
+      return res.status(400).json({ error: 'Conversation ID is required' });
+    }
+    
+    // Get messages from database
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    
+    if (error) {
+      console.error('Error getting messages:', error);
+      return res.status(500).json({ error: 'Failed to get messages' });
+    }
+    
+    // Format messages for the client
+    const messages = data.map(msg => ({
+      id: msg.id,
+      role: msg.role,
+      content: msg.content,
+      createdAt: msg.created_at
+    }));
+    
+    res.json({ messages });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Create a new conversation
+ */
+exports.createConversation = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { title } = req.body;
+    
+    // Create conversation in database
+    const { data, error } = await supabase
+      .from('conversations')
+      .insert({
+        user_id: userId,
+        title: title || 'New Conversation',
+        created_at: new Date(),
+        updated_at: new Date()
+      })
+      .select();
+    
+    if (error) {
+      console.error('Error creating conversation:', error);
+      return res.status(500).json({ error: 'Failed to create conversation' });
+    }
+    
+    res.json({ conversation: data[0] });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get all conversations for a user
+ */
+exports.getConversations = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    
+    // Get conversations from database
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error getting conversations:', error);
+      return res.status(500).json({ error: 'Failed to get conversations' });
+    }
+    
+    // Format conversations for the client
+    const conversations = data.map(conv => ({
+      id: conv.id,
+      title: conv.title,
+      createdAt: conv.created_at,
+      updatedAt: conv.updated_at
+    }));
+    
+    res.json({ conversations });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Delete a conversation
+ */
+exports.deleteConversation = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { conversationId } = req.params;
+    
+    // Validate required parameters
+    if (!conversationId) {
+      return res.status(400).json({ error: 'Conversation ID is required' });
+    }
+    
+    // Delete conversation from database
+    const { error } = await supabase
+      .from('conversations')
+      .delete()
+      .eq('user_id', userId)
+      .eq('id', conversationId);
+    
+    if (error) {
+      console.error('Error deleting conversation:', error);
+      return res.status(500).json({ error: 'Failed to delete conversation' });
+    }
+    
+    // Also delete all messages in the conversation
+    const { error: messagesError } = await supabase
+      .from('messages')
+      .delete()
+      .eq('user_id', userId)
+      .eq('conversation_id', conversationId);
+    
+    if (messagesError) {
+      console.error('Error deleting messages:', messagesError);
+      // Continue even if message deletion fails
+    }
+    
+    res.json({ success: true });
   } catch (error) {
     next(error);
   }

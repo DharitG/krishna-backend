@@ -1,6 +1,7 @@
 // Chat socket handler
 const openaiService = require('../services/openai.service');
 const langchainService = require('../services/langchain.service');
+const { supabase } = require('../services/supabase');
 
 /**
  * Simple function to generate a mock streaming response
@@ -50,10 +51,12 @@ const handleChatSocket = (io, socket) => {
       console.log('Received message via WebSocket:', {
         messageCount: data?.messages?.length,
         useTools: data?.useTools,
-        toolCount: data?.enabledTools?.length
+        toolCount: data?.enabledTools?.length,
+        authStatus: Object.keys(data?.authStatus || {})
       });
       
-      const { messages, enabledTools = [], useTools = true, chatId } = data;
+      const { messages, enabledTools = [], useTools = true, chatId, authStatus = {} } = data;
+      const userId = socket.user?.id || 'anonymous';
       
       // Validate input
       if (!Array.isArray(messages) || messages.length === 0) {
@@ -75,16 +78,56 @@ const handleChatSocket = (io, socket) => {
       if (useTools && enabledTools.length > 0) {
         // Process with tools using LangChain
         try {
-          console.log('Processing message with tools using LangChain');
+          console.log(`Processing message with tools using LangChain: ${enabledTools.join(', ')}`);
+          
+          // Get service tokens for authentication status
+          const { data: serviceTokens, error: tokensError } = await supabase
+            .from('service_tokens')
+            .select('service_name, access_token, expires_at')
+            .eq('user_id', userId);
+          
+          // Process auth status
+          const combinedAuthStatus = { ...authStatus };
+          const now = new Date();
+          
+          if (serviceTokens) {
+            serviceTokens.forEach(token => {
+              const isValid = token.expires_at ? new Date(token.expires_at) > now : false;
+              combinedAuthStatus[token.service_name.toLowerCase()] = isValid;
+            });
+          }
           
           // Stream the response
-          const stream = await langchainService.getStreamingAgentResponse(messages, enabledTools);
+          const stream = await langchainService.getStreamingAgentResponse(
+            messages, 
+            enabledTools,
+            userId,
+            combinedAuthStatus
+          );
           
           // Process the stream
           for await (const chunk of stream) {
-            if (chunk.content) {
+            // Check if this chunk has an auth request
+            if (chunk.requiresAuth) {
+              // Emit the auth request
+              socket.emit('auth_required', {
+                service: chunk.service,
+                message: chunk.content
+              });
+              
+              // Update assistant message with auth request
+              assistantMessage.content = chunk.content;
+              assistantMessage.requiresAuth = true;
+              assistantMessage.service = chunk.service;
+              
+              // Emit the updated message
+              socket.emit('message_chunk', {
+                ...assistantMessage,
+                chatId
+              });
+            } else if (chunk.content) {
               // Update assistant message
-              assistantMessage.content += chunk.content;
+              assistantMessage.content = chunk.content;
               
               // Emit the updated message
               socket.emit('message_chunk', {
