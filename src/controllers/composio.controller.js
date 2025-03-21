@@ -4,32 +4,74 @@ const langchainService = require('../services/langchain.service');
 
 /**
  * Initialize authentication with a third-party service
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
  */
-exports.initAuthentication = async (req, res, next) => {
+exports.initAuthentication = async (req, res) => {
+  const { service } = req.params;
+  const userId = req.user.id;
+
   try {
-    const userId = req.user.id;
-    const { service } = req.params;
-    
-    // Validate service name
-    if (!service) {
-      return res.status(400).json({ error: 'Service name is required' });
+    // Check if Composio API key is configured
+    if (!process.env.COMPOSIO_API_KEY) {
+      return res.status(400).json({ 
+        error: 'Composio API key is not configured.', 
+        configError: true 
+      });
     }
-    
-    // Initialize authentication with Composio
+
+    // Check if backend URL is configured
+    if (!process.env.BACKEND_URL) {
+      return res.status(400).json({ 
+        error: 'Backend URL is not configured. This is required for OAuth callbacks.', 
+        configError: true 
+      });
+    }
+
+    // Special handling for Gmail service
+    if (service.toLowerCase() === 'gmail') {
+      try {
+        // Initialize authentication with Composio
+        const authInfo = await composioService.initAuthentication(service, userId);
+        
+        // Check if we're in mock mode
+        if (composioService.mockMode) {
+          return res.json({ 
+            redirectUrl: 'https://accounts.google.com/o/oauth2/auth', 
+            mockMode: true,
+            message: 'Using mock mode because Composio API is unreachable' 
+          });
+        }
+        
+        return res.json(authInfo);
+      } catch (error) {
+        console.error('Gmail auth error:', error);
+        
+        // Provide more specific error message for Gmail
+        if (error.response && error.response.status === 400) {
+          return res.status(400).json({ 
+            error: 'Failed to authenticate with Gmail. Please ensure Gmail is properly configured in the Composio dashboard.', 
+            composioError: true 
+          });
+        }
+        
+        throw error; // Let the general error handler catch it
+      }
+    }
+
+    // For other services
     const authInfo = await composioService.initAuthentication(service, userId);
     
-    if (authInfo.error) {
-      return res.status(400).json({ error: authInfo.error });
+    // If we're in mock mode, indicate this to the client
+    if (composioService.mockMode) {
+      authInfo.mockMode = true;
+      authInfo.message = 'Using mock mode because Composio API is unreachable';
     }
     
-    res.json({
-      service,
-      redirectUrl: authInfo.redirectUrl,
-      status: 'pending'
-    });
+    res.json(authInfo);
   } catch (error) {
-    console.error(`Error initializing ${req.params.service} authentication:`, error);
-    next(error);
+    console.error(`Error initializing authentication with ${service}:`, error);
+    res.status(500).json({ error: `Failed to initialize authentication with ${service}: ${error.message}` });
   }
 };
 

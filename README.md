@@ -19,7 +19,42 @@ This is the backend API for the August AI Super Agent mobile app. It handles aut
 
 ## Getting Started
 
-See [SETUP.md](./SETUP.md) for detailed instructions on how to set up the backend.
+See [SETUP.md](./SETUP.md) for detailed setup instructions.
+
+For setting up Composio integration (required for Gmail, GitHub, and other tool capabilities), see [COMPOSIO_SETUP.md](./COMPOSIO_SETUP.md).
+
+## Environment Variables
+
+The following environment variables need to be set in a `.env` file:
+
+```makefile
+# Server Configuration
+PORT=3000
+NODE_ENV=development
+BACKEND_URL=http://localhost:3000
+APP_URL=exp://localhost:8081
+
+# Supabase Configuration
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_KEY=your-service-key
+
+# Composio Configuration
+COMPOSIO_API_KEY=your-composio-api-key
+
+# Azure OpenAI Configuration
+AZURE_OPENAI_API_KEY=your-azure-api-key
+AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
+```
+
+## Development
+
+To run the server in development mode:
+
+```bash
+npm run dev
+```
 
 ## API Endpoints
 
