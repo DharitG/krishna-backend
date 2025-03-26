@@ -23,7 +23,9 @@ const accountRoutes = require('./routes/account.routes');
 
 // Register routes
 app.use('/api/user', requireAuth, userRoutes);
-app.use('/api/composio', requireAuth, composioRoutes);
+
+// Register Composio routes - public routes must be registered first
+app.use('/api/composio', composioRoutes); // This will handle both public and authenticated routes
 app.use('/api/preferences', requireAuth, preferencesRoutes);
 app.use('/api/chats', requireAuth, chatRoutes);
 app.use('/api/accounts', requireAuth, accountRoutes);

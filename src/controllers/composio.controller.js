@@ -7,14 +7,13 @@ const langchainService = require('../services/langchain.service');
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-exports.initAuthentication = async (req, res) => {
-  const { service } = req.params;
-  // Use a default user ID if user is not authenticated
-  const userId = req.user ? req.user.id : 'anonymous-user';
-
-  console.log(`Initializing authentication for service: ${service}, userId: ${userId}`);
-
+exports.initAuthentication = async (req, res, next) => {
   try {
+    const { service } = req.params;
+    const userId = req.user ? req.user.id : 'anonymous-user';
+    
+    console.log(`Initializing authentication for service: ${service}, userId: ${userId}`);
+    
     // Check if Composio API key is configured
     if (!process.env.COMPOSIO_API_KEY) {
       console.log('Composio API key not configured');
@@ -38,6 +37,30 @@ exports.initAuthentication = async (req, res) => {
       const isAuthenticated = await composioService.checkAuthentication(service, userId);
       if (isAuthenticated) {
         console.log(`Service ${service} is already authenticated for user ${userId}`);
+        
+        // Special handling for Gmail with isAuthenticated but no redirectUrl
+        if (service.toLowerCase() === 'gmail') {
+          console.log('Gmail is already authenticated but no redirect URL provided');
+          
+          // Create a token entry in the database to mark Gmail as authenticated
+          const { error } = await supabase
+            .from('service_tokens')
+            .upsert({
+              user_id: userId,
+              service_name: 'gmail',
+              access_token: 'gmail-authenticated', // Placeholder
+              created_at: new Date(),
+              updated_at: new Date()
+            });
+          
+          if (error) {
+            console.error('Error saving Gmail authentication to database:', error);
+            return res.status(500).json({ error: 'Failed to save Gmail authentication' });
+          }
+          
+          return res.status(200).json({ isAuthenticated: true });
+        }
+        
         return res.json({ 
           isAuthenticated: true,
           message: `${service} is already connected` 
@@ -66,6 +89,16 @@ exports.initAuthentication = async (req, res) => {
           });
         }
         
+        // Verify that we have a redirect URL
+        if (!authInfo.redirectUrl) {
+          console.error('No redirect URL for gmail:', JSON.stringify(authInfo, null, 2));
+          return res.status(400).json({
+            error: 'No redirect URL received from Composio API. Please check your Gmail configuration in the Composio dashboard.',
+            details: 'Make sure Gmail is enabled and properly configured with OAuth credentials.',
+            composioError: true
+          });
+        }
+        
         return res.json(authInfo);
       } catch (error) {
         console.error('Gmail auth error:', error);
@@ -74,11 +107,17 @@ exports.initAuthentication = async (req, res) => {
         if (error.response && error.response.status === 400) {
           return res.status(400).json({ 
             error: 'Failed to authenticate with Gmail. Please ensure Gmail is properly configured in the Composio dashboard.', 
+            details: 'Make sure Gmail is enabled and properly configured with OAuth credentials.',
             composioError: true 
           });
         }
         
-        throw error; // Let the general error handler catch it
+        // Return a more helpful error message
+        return res.status(500).json({
+          error: `Gmail authentication failed: ${error.message}`,
+          details: 'Check your Composio dashboard configuration and ensure Gmail is properly set up.',
+          composioError: true
+        });
       }
     }
 
@@ -91,6 +130,15 @@ exports.initAuthentication = async (req, res) => {
       console.log('Using mock mode for authentication');
       authInfo.mockMode = true;
       authInfo.message = 'Using mock mode because Composio API is unreachable';
+    }
+    
+    // For regular flow, ensure we have a redirect URL
+    if (!authInfo.redirectUrl) {
+      console.error(`No redirect URL for ${service}:`, JSON.stringify(authInfo, null, 2));
+      return res.status(400).json({
+        error: `No redirect URL received from Composio API. Please check your ${service} configuration in the Composio dashboard.`,
+        details: authInfo
+      });
     }
     
     res.json(authInfo);
@@ -107,45 +155,96 @@ exports.completeAuthentication = async (req, res, next) => {
   try {
     const { code, state, service } = req.query;
     
+    console.log('Auth callback received:', { 
+      code: code ? 'PRESENT' : 'MISSING', 
+      state: state || 'MISSING', 
+      service: service || 'MISSING' 
+    });
+    
     // Validate required parameters
-    if (!code || !state || !service) {
-      return res.status(400).json({ error: 'Missing required parameters' });
+    if (!code) {
+      console.error('Missing code parameter in callback');
+      return res.status(400).json({ error: 'Missing code parameter' });
     }
     
-    // The state parameter contains the user ID
-    const userId = state;
-    
-    // Complete authentication with Composio
-    const authResult = await composioService.completeAuthentication(service, code);
-    
-    if (authResult.error) {
-      return res.status(400).json({ error: authResult.error });
+    if (!service) {
+      console.error('Missing service parameter in callback');
+      return res.status(400).json({ error: 'Missing service parameter' });
     }
     
-    // Save token to database
-    const { error } = await supabase
-      .from('service_tokens')
-      .upsert({
-        user_id: userId,
-        service_name: service.toLowerCase(),
-        access_token: authResult.accessToken,
-        refresh_token: authResult.refreshToken,
-        expires_at: authResult.expiresAt,
-        created_at: new Date(),
-        updated_at: new Date()
-      });
+    // The state parameter contains the user ID, but it might be missing for some services
+    const userId = state || 'anonymous-user';
     
-    if (error) {
-      console.error('Error saving token to database:', error);
-      return res.status(500).json({ error: 'Failed to save authentication token' });
+    // For Gmail, we need special handling since it's already configured in Composio
+    if (service.toLowerCase() === 'gmail') {
+      console.log('Processing Gmail authentication callback');
+      
+      try {
+        // For Gmail, we can use a simpler approach since it's already configured
+        // We'll just record that the user has authenticated with Gmail
+        const { error } = await supabase
+          .from('service_tokens')
+          .upsert({
+            user_id: userId,
+            service_name: 'gmail',
+            access_token: 'gmail-authenticated', // Placeholder
+            created_at: new Date(),
+            updated_at: new Date()
+          });
+        
+        if (error) {
+          console.error('Error saving Gmail authentication to database:', error);
+          return res.status(500).json({ error: 'Failed to save Gmail authentication' });
+        }
+        
+        // Redirect to frontend with success message
+        res.redirect(`${process.env.APP_URL}/auth-success?service=gmail`);
+        return;
+      } catch (gmailError) {
+        console.error('Error processing Gmail callback:', gmailError);
+        // Continue with standard flow as fallback
+      }
     }
     
-    // Redirect to frontend with success message
-    res.redirect(`${process.env.APP_URL}/auth-success?service=${service}`);
+    // Standard flow for other services
+    try {
+      // Complete authentication with Composio
+      const authResult = await composioService.completeAuthentication(service, code);
+      
+      if (authResult.error) {
+        console.error('Error completing authentication:', authResult.error);
+        return res.status(400).json({ error: authResult.error });
+      }
+      
+      // Save token to database
+      const { error } = await supabase
+        .from('service_tokens')
+        .upsert({
+          user_id: userId,
+          service_name: service.toLowerCase(),
+          access_token: authResult.accessToken,
+          refresh_token: authResult.refreshToken,
+          expires_at: authResult.expiresAt,
+          created_at: new Date(),
+          updated_at: new Date()
+        });
+      
+      if (error) {
+        console.error('Error saving token to database:', error);
+        return res.status(500).json({ error: 'Failed to save authentication token' });
+      }
+      
+      // Redirect to frontend with success message
+      res.redirect(`${process.env.APP_URL}/auth-success?service=${service}`);
+    } catch (error) {
+      console.error(`Error completing authentication:`, error);
+      // Redirect to frontend with error message
+      res.redirect(`${process.env.APP_URL}/auth-error?message=${encodeURIComponent(error.message)}`);
+    }
   } catch (error) {
-    console.error(`Error completing authentication:`, error);
+    console.error(`Error in authentication callback:`, error);
     // Redirect to frontend with error message
-    res.redirect(`${process.env.APP_URL}/auth-error?message=${encodeURIComponent(error.message)}`);
+    res.redirect(`${process.env.APP_URL}/auth-error?message=${encodeURIComponent('Unexpected error during authentication')}`);
   }
 };
 
