@@ -368,9 +368,18 @@ exports.executeToolCall = async (req, res, next) => {
 exports.checkToolAuth = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { tools } = req.body;
+    let toolsToCheck = [];
     
-    if (!tools || !Array.isArray(tools) || tools.length === 0) {
+    // Handle both formats: { toolName: string } and { tools: array }
+    if (req.body.toolName) {
+      toolsToCheck = [req.body.toolName];
+    } else if (req.body.tools && Array.isArray(req.body.tools)) {
+      toolsToCheck = req.body.tools;
+    } else {
+      return res.status(400).json({ error: 'No tools specified. Provide either toolName or tools array.' });
+    }
+    
+    if (toolsToCheck.length === 0) {
       return res.status(400).json({ error: 'No tools specified' });
     }
     
@@ -394,7 +403,7 @@ exports.checkToolAuth = async (req, res, next) => {
     // Check each tool for auth requirements
     const results = {};
     
-    for (const tool of tools) {
+    for (const tool of toolsToCheck) {
       // Create a mock tool call to check auth requirements
       const mockToolCall = {
         function: {

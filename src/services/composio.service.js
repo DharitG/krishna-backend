@@ -66,7 +66,7 @@ class ComposioService {
         {
           service: normalizedService,
           userId: userId,
-          redirectUrl: `${process.env.BACKEND_URL}/api/composio/auth/callback?service=${normalizedService}`
+          redirectUrl: `https://backend.composio.dev/s/LqcVWnMM`
         },
         {
           headers: {
