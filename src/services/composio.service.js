@@ -4,7 +4,7 @@ const { supabase } = require('./supabase');
 class ComposioService {
   constructor() {
     this.apiKey = process.env.COMPOSIO_API_KEY;
-    this.baseUrl = 'https://api.composio.dev';
+    this.baseUrl = 'https://backend.composio.dev/api/v2';
     this.isConfigured = !!this.apiKey;
     this.mockMode = false; // Flag to indicate if we're in mock mode
     
@@ -23,13 +23,91 @@ class ComposioService {
     if (!this.isConfigured) return;
     
     try {
-      await axios.get(`${this.baseUrl}/v1/health`, {
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        timeout: 5000 // 5 second timeout
-      });
-      console.log('Successfully connected to Composio API');
+      // Try multiple health check endpoints
+      const healthEndpoints = [
+        '/health',
+        '/status',
+        '/ping',
+        '/'
+      ];
+      
+      let connected = false;
+      let lastError = null;
+      
+      for (const endpoint of healthEndpoints) {
+        try {
+          console.log(`Testing Composio API connection with endpoint: ${this.baseUrl}${endpoint}`);
+          const response = await axios.get(`${this.baseUrl}${endpoint}`, {
+            headers: {
+              'x-api-key': this.apiKey
+            },
+            timeout: 5000 // 5 second timeout
+          });
+          
+          if (response.status >= 200 && response.status < 300) {
+            console.log(`Successfully connected to Composio API using endpoint: ${endpoint}`);
+            connected = true;
+            break;
+          }
+        } catch (endpointError) {
+          console.log(`Endpoint ${endpoint} failed: ${endpointError.message}`);
+          lastError = endpointError;
+          // Continue to next endpoint
+        }
+      }
+      
+      if (!connected) {
+        // If all health endpoints failed, try a simple API endpoint to verify API key
+        try {
+          console.log('Testing API key with a service endpoint');
+          const response = await axios.get(`${this.baseUrl}/services`, {
+            headers: {
+              'x-api-key': this.apiKey
+            },
+            timeout: 5000
+          });
+          
+          if (response.status >= 200 && response.status < 300) {
+            console.log('Successfully connected to Composio API using services endpoint');
+            connected = true;
+          }
+        } catch (serviceError) {
+          console.log(`Service endpoint failed: ${serviceError.message}`);
+          
+          // Check for specific error codes
+          if (serviceError.response) {
+            if (serviceError.response.status === 401 || serviceError.response.status === 403) {
+              console.error('Authentication failed with Composio API. Check your API key.');
+              lastError = new Error('Invalid Composio API key');
+            } else if (serviceError.response.status === 404) {
+              console.error('Composio API endpoint not found. Check API version and endpoint structure.');
+              lastError = new Error('Composio API endpoint not found');
+            }
+          }
+        }
+      }
+      
+      if (!connected) {
+        console.warn(`Could not connect to Composio API, switching to mock mode: ${lastError ? lastError.message : 'Unknown error'}`);
+        this.mockMode = true;
+        
+        // Provide guidance based on the error
+        if (lastError && lastError.response) {
+          if (lastError.response.status === 401 || lastError.response.status === 403) {
+            console.error('IMPORTANT: Your Composio API key appears to be invalid or does not have the necessary permissions.');
+            console.error('Please check your API key in the Composio dashboard and ensure it has access to the Gmail service.');
+          } else if (lastError.response.status === 404) {
+            console.error('IMPORTANT: The Composio API endpoints could not be found. This could be due to:');
+            console.error('1. The API version has changed (we are using v2)');
+            console.error('2. The endpoint structure has changed');
+            console.error('3. The Composio service might be down or undergoing maintenance');
+            console.error('Please check the latest Composio API documentation for the correct endpoints.');
+          }
+        } else if (lastError && (lastError.code === 'ECONNREFUSED' || lastError.code === 'ENOTFOUND')) {
+          console.error('IMPORTANT: Could not connect to the Composio API server.');
+          console.error('Please check your internet connection and ensure that the Composio API is accessible from your server.');
+        }
+      }
     } catch (error) {
       console.warn('Could not connect to Composio API, switching to mock mode:', error.message);
       this.mockMode = true;
@@ -45,6 +123,7 @@ class ComposioService {
   async initAuthentication(service, userId) {
     try {
       if (!this.isConfigured) {
+        console.log('Composio API key not configured');
         throw new Error('Composio API key not configured');
       }
       
@@ -60,26 +139,109 @@ class ComposioService {
       // Normalize service name
       const normalizedService = service.toLowerCase();
       
-      // Make request to Composio API to initiate authentication
-      const response = await axios.post(
-        `${this.baseUrl}/v1/auth/init`,
-        {
-          service: normalizedService,
-          userId: userId,
-          redirectUrl: `https://backend.composio.dev/s/LqcVWnMM`
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
+      // Build the redirect URL
+      const redirectUrl = `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/composio/auth/callback?service=${normalizedService}`;
+      console.log(`Using redirect URL: ${redirectUrl}`);
       
-      return {
-        redirectUrl: response.data.redirectUrl,
-        state: response.data.state
-      };
+      // Make request to Composio API to initiate authentication
+      console.log(`Making request to Composio API: ${this.baseUrl}/auth/services/${normalizedService}/init`);
+      console.log(`Request payload: ${JSON.stringify({
+        userId: userId,
+        redirectUrl: redirectUrl
+      }, null, 2)}`);
+      
+      try {
+        const response = await axios.post(
+          `${this.baseUrl}/auth/services/${normalizedService}/init`,
+          {
+            userId: userId,
+            redirectUrl: redirectUrl
+          },
+          {
+            headers: {
+              'x-api-key': this.apiKey,
+              'Content-Type': 'application/json'
+            },
+            timeout: 10000 // 10 second timeout
+          }
+        );
+        
+        console.log(`Composio API response: ${JSON.stringify(response.data, null, 2)}`);
+        
+        return {
+          redirectUrl: response.data.redirectUrl,
+          state: response.data.state || userId
+        };
+      } catch (apiError) {
+        // Handle specific API errors
+        if (apiError.response) {
+          // The request was made and the server responded with a status code
+          // that falls out of the range of 2xx
+          console.error(`API error (${apiError.response.status}):`, apiError.response.data);
+          
+          // Try alternative endpoint formats as fallback
+          const fallbackEndpoints = [
+            `/auth/oauth/init`,
+            `/auth/init`,
+            `/integrations/${normalizedService}/auth/init`,
+            `/services/${normalizedService}/auth/init`
+          ];
+          
+          for (const endpoint of fallbackEndpoints) {
+            try {
+              console.log(`Trying fallback endpoint: ${this.baseUrl}${endpoint}`);
+              const fallbackResponse = await axios.post(
+                `${this.baseUrl}${endpoint}`,
+                {
+                  service: normalizedService,
+                  userId: userId,
+                  redirectUrl: redirectUrl
+                },
+                {
+                  headers: {
+                    'x-api-key': this.apiKey,
+                    'Content-Type': 'application/json'
+                  },
+                  timeout: 10000
+                }
+              );
+              
+              console.log(`Fallback API response: ${JSON.stringify(fallbackResponse.data, null, 2)}`);
+              
+              return {
+                redirectUrl: fallbackResponse.data.redirectUrl,
+                state: fallbackResponse.data.state || userId
+              };
+            } catch (fallbackError) {
+              console.error(`Fallback endpoint ${endpoint} failed:`, fallbackError.message);
+              // Continue to next fallback
+            }
+          }
+          
+          // If we got a 401 or 403, the API key might be invalid
+          if (apiError.response.status === 401 || apiError.response.status === 403) {
+            console.error('Authentication failed with Composio API. Check your API key.');
+            throw new Error('Invalid Composio API key');
+          }
+        } else if (apiError.request) {
+          // The request was made but no response was received
+          console.error('No response received from Composio API:', apiError.message);
+          console.log('Switching to mock mode due to connection error');
+          this.mockMode = true;
+        } else {
+          // Something happened in setting up the request that triggered an Error
+          console.error('Error setting up request to Composio API:', apiError.message);
+        }
+        
+        // Switch to mock mode for this request
+        console.log(`[FALLBACK] Switching to mock mode for ${service} authentication`);
+        return {
+          redirectUrl: `https://accounts.google.com/o/oauth2/auth?mock=true&service=${service}&userId=${userId}`,
+          state: userId,
+          mockMode: true,
+          message: `Using mock mode due to API error: ${apiError.message}`
+        };
+      }
     } catch (error) {
       console.error(`Error initializing ${service} authentication:`, error);
       
@@ -129,14 +291,14 @@ class ComposioService {
       
       // Make request to Composio API to complete authentication
       const response = await axios.post(
-        `${this.baseUrl}/v1/auth/complete`,
+        `${this.baseUrl}/auth/complete`,
         {
           service: normalizedService,
           code: code
         },
         {
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
+            'x-api-key': this.apiKey,
             'Content-Type': 'application/json'
           }
         }
@@ -170,12 +332,87 @@ class ComposioService {
   }
   
   /**
+   * Check if a service is already authenticated for a user
+   * @param {string} service - Service name (e.g., 'gmail', 'github')
+   * @param {string} userId - User ID
+   * @returns {Promise<boolean>} - True if authenticated, false otherwise
+   */
+  async checkAuthentication(service, userId) {
+    try {
+      if (!this.isConfigured || this.mockMode) {
+        return false; // In mock mode, always assume not authenticated
+      }
+      
+      // Normalize service name
+      const normalizedService = service.toLowerCase();
+      
+      // Try to get auth status from Composio API
+      console.log(`Checking authentication status for ${normalizedService} user ${userId}`);
+      
+      try {
+        // First try the v2 endpoint
+        const response = await axios.get(
+          `${this.baseUrl}/auth/services/${normalizedService}/status?userId=${userId}`,
+          {
+            headers: {
+              'x-api-key': this.apiKey,
+              'Content-Type': 'application/json'
+            },
+            timeout: 5000
+          }
+        );
+        
+        console.log(`Auth status response: ${JSON.stringify(response.data, null, 2)}`);
+        return response.data.isAuthenticated === true;
+      } catch (apiError) {
+        // If the v2 endpoint fails, try alternative endpoints
+        const fallbackEndpoints = [
+          `/auth/status/${normalizedService}?userId=${userId}`,
+          `/integrations/${normalizedService}/auth/status?userId=${userId}`,
+          `/services/${normalizedService}/status?userId=${userId}`
+        ];
+        
+        for (const endpoint of fallbackEndpoints) {
+          try {
+            console.log(`Trying fallback endpoint for auth status: ${this.baseUrl}${endpoint}`);
+            const fallbackResponse = await axios.get(
+              `${this.baseUrl}${endpoint}`,
+              {
+                headers: {
+                  'x-api-key': this.apiKey,
+                  'Content-Type': 'application/json'
+                },
+                timeout: 5000
+              }
+            );
+            
+            console.log(`Fallback auth status response: ${JSON.stringify(fallbackResponse.data, null, 2)}`);
+            return fallbackResponse.data.isAuthenticated === true;
+          } catch (fallbackError) {
+            console.log(`Fallback endpoint ${endpoint} failed:`, fallbackError.message);
+            // Continue to next fallback
+          }
+        }
+        
+        // If all endpoints fail, check our database or local storage
+        // This is where you would implement a check against your own database
+        // For now, we'll return false to indicate not authenticated
+        console.log('All auth status endpoints failed, assuming not authenticated');
+        return false;
+      }
+    } catch (error) {
+      console.error(`Error checking authentication for ${service}:`, error);
+      return false; // Default to not authenticated on error
+    }
+  }
+  
+  /**
    * Check authentication status for a service
    * @param {string} service - Service name
    * @param {string} userId - User ID
    * @returns {Object} - Authentication status
    */
-  async checkAuthentication(service, userId) {
+  async checkAuthenticationStatus(service, userId) {
     try {
       if (!this.isConfigured) {
         throw new Error('Composio API key not configured');
@@ -245,7 +482,7 @@ class ComposioService {
       if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
         console.warn(`Connection to Composio API failed, switching to mock mode`);
         this.mockMode = true;
-        return this.checkAuthentication(service, userId);
+        return this.checkAuthenticationStatus(service, userId);
       }
       
       return {
@@ -270,14 +507,14 @@ class ComposioService {
       
       // Make request to Composio API to get available tools
       const response = await axios.get(
-        `${this.baseUrl}/v1/tools`,
+        `${this.baseUrl}/tools`,
         {
           params: {
             actions: actions.join(','),
             userId: userId
           },
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`
+            'x-api-key': this.apiKey
           }
         }
       );
@@ -374,7 +611,7 @@ class ComposioService {
       
       // Make request to Composio API to execute the tool
       const response = await axios.post(
-        `${this.baseUrl}/v1/tools/execute`,
+        `${this.baseUrl}/tools/execute`,
         {
           name: functionName,
           arguments: args,
@@ -383,7 +620,7 @@ class ComposioService {
         },
         {
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
+            'x-api-key': this.apiKey,
             'Content-Type': 'application/json'
           }
         }

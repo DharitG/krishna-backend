@@ -9,11 +9,15 @@ const langchainService = require('../services/langchain.service');
  */
 exports.initAuthentication = async (req, res) => {
   const { service } = req.params;
-  const userId = req.user.id;
+  // Use a default user ID if user is not authenticated
+  const userId = req.user ? req.user.id : 'anonymous-user';
+
+  console.log(`Initializing authentication for service: ${service}, userId: ${userId}`);
 
   try {
     // Check if Composio API key is configured
     if (!process.env.COMPOSIO_API_KEY) {
+      console.log('Composio API key not configured');
       return res.status(400).json({ 
         error: 'Composio API key is not configured.', 
         configError: true 
@@ -22,20 +26,39 @@ exports.initAuthentication = async (req, res) => {
 
     // Check if backend URL is configured
     if (!process.env.BACKEND_URL) {
+      console.log('Backend URL not configured');
       return res.status(400).json({ 
         error: 'Backend URL is not configured. This is required for OAuth callbacks.', 
         configError: true 
       });
     }
 
+    // Check if the service is already authenticated
+    try {
+      const isAuthenticated = await composioService.checkAuthentication(service, userId);
+      if (isAuthenticated) {
+        console.log(`Service ${service} is already authenticated for user ${userId}`);
+        return res.json({ 
+          isAuthenticated: true,
+          message: `${service} is already connected` 
+        });
+      }
+    } catch (checkError) {
+      console.log(`Error checking authentication status: ${checkError.message}`);
+      // Continue with authentication initialization
+    }
+
     // Special handling for Gmail service
     if (service.toLowerCase() === 'gmail') {
       try {
+        console.log('Initializing Gmail authentication');
         // Initialize authentication with Composio
         const authInfo = await composioService.initAuthentication(service, userId);
+        console.log('Gmail auth info:', JSON.stringify(authInfo, null, 2));
         
         // Check if we're in mock mode
         if (composioService.mockMode) {
+          console.log('Using mock mode for Gmail authentication');
           return res.json({ 
             redirectUrl: 'https://accounts.google.com/o/oauth2/auth', 
             mockMode: true,
@@ -61,9 +84,11 @@ exports.initAuthentication = async (req, res) => {
 
     // For other services
     const authInfo = await composioService.initAuthentication(service, userId);
+    console.log('Auth info:', JSON.stringify(authInfo, null, 2));
     
     // If we're in mock mode, indicate this to the client
     if (composioService.mockMode) {
+      console.log('Using mock mode for authentication');
       authInfo.mockMode = true;
       authInfo.message = 'Using mock mode because Composio API is unreachable';
     }

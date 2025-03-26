@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const composioController = require('../controllers/composio.controller');
-const authMiddleware = require('../middleware/auth.middleware');
+const { requireAuth } = require('../middleware/auth.middleware');
 
 // Test endpoint that doesn't require authentication
 router.get('/test', (req, res) => {
@@ -10,11 +10,10 @@ router.get('/test', (req, res) => {
 
 // Authentication routes (no auth required)
 router.get('/auth/callback', composioController.completeAuthentication);
+router.post('/auth/init/:service', composioController.initAuthentication);
 
 // Protected routes (require authentication)
-
-// Authentication management
-router.post('/auth/init/:service', composioController.initAuthentication);
+router.use(requireAuth);
 router.get('/auth/status/:service', composioController.checkAuth);
 
 // Tool management

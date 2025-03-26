@@ -22,7 +22,7 @@
   "dependencies": {
     "@langchain/openai": "^0.4.4",
     "@supabase/supabase-js": "^2.49.1",
-    "composio-core": "^0.5.18",
+    "composio-core": "^0.5.31",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
