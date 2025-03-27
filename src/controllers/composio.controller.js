@@ -1,6 +1,7 @@
 const { supabase } = require('../services/supabase');
 const composioService = require('../services/composio.service');
 const langchainService = require('../services/langchain.service');
+const axios = require('axios');
 
 /**
  * Initialize authentication with a third-party service
@@ -175,13 +176,35 @@ exports.completeAuthentication = async (req, res, next) => {
     // The state parameter contains the user ID, but it might be missing for some services
     const userId = state || 'anonymous-user';
     
-    // For Gmail, we need special handling since it's already configured in Composio
+    // For Gmail, we need special handling
     if (service.toLowerCase() === 'gmail') {
       console.log('Processing Gmail authentication callback');
       
       try {
-        // For Gmail, we can use a simpler approach since it's already configured
-        // We'll just record that the user has authenticated with Gmail
+        // Get the connection ID from the session or query parameters if available
+        const connectionId = req.query.connectionId || req.session?.connectionId;
+        
+        if (connectionId) {
+          console.log(`Updating Composio connection ${connectionId} with authorization code`);
+          
+          // Update the connection with the authorization code
+          try {
+            const gmailIntegrationId = process.env.GMAIL_INTEGRATION_ID || 'aa83b6b2-e86c-4963-a117-84c6db7551e8';
+            
+            await axios.post(
+              `${composioService.baseUrl}/api/v2/integrations/${gmailIntegrationId}/connections/${connectionId}/auth`,
+              { code },
+              { headers: { 'x-api-key': composioService.apiKey } }
+            );
+            
+            console.log('Successfully updated connection with authorization code');
+          } catch (updateError) {
+            console.error('Error updating connection with authorization code:', updateError);
+            // Continue with the flow even if this fails
+          }
+        }
+        
+        // Record the authentication in our database
         const { error } = await supabase
           .from('service_tokens')
           .upsert({
@@ -199,9 +222,8 @@ exports.completeAuthentication = async (req, res, next) => {
         
         // Redirect to frontend with success message
         res.redirect(`${process.env.APP_URL}/auth-success?service=gmail`);
-        return;
-      } catch (gmailError) {
-        console.error('Error processing Gmail callback:', gmailError);
+      } catch (error) {
+        console.error('Error processing Gmail callback:', error);
         // Continue with standard flow as fallback
       }
     }

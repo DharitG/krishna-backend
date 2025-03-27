@@ -168,10 +168,9 @@ class ComposioService {
       // Normalize service name
       const normalizedService = service.toLowerCase();
       
-      // For Gmail, use the fixed redirect URL from the Composio dashboard
-      // This is a special case since Gmail is already configured in Composio
+      // For Gmail, we need to properly initialize the connection with Composio
       if (normalizedService === 'gmail') {
-        console.log('Using pre-configured Gmail redirect URL from Composio dashboard');
+        console.log('Initializing Gmail connection with Composio');
         
         // First, check if Gmail is already authenticated for this user
         try {
@@ -187,11 +186,57 @@ class ComposioService {
           // Continue with normal flow
         }
         
-        // If not authenticated, return the redirect URL
-        return {
-          redirectUrl: 'https://backend.composio.dev/s/LqcVWnMM',
-          state: userId
-        };
+        // Get the integration ID for Gmail from the environment variables or use the one from your integration details
+        const gmailIntegrationId = process.env.GMAIL_INTEGRATION_ID || 'aa83b6b2-e86c-4963-a117-84c6db7551e8';
+        
+        // The backend URL for the callback
+        const backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
+        const redirectUrl = `${backendUrl}/api/composio/auth/callback?service=gmail`;
+        
+        try {
+          // Initialize the connection with Composio
+          const response = await axios.post(
+            `${this.baseUrl}/api/v2/integrations/${gmailIntegrationId}/connections`, 
+            {
+              redirectUrl: redirectUrl,
+              entity: 'default',
+              labels: [`user-${userId}`]
+            },
+            {
+              headers: { 'x-api-key': this.apiKey }
+            }
+          );
+          
+          console.log('Composio connection response:', JSON.stringify(response.data, null, 2));
+          
+          if (response.data && response.data.redirectUrl) {
+            // Store the connection ID in the redirect URL
+            const redirectUrlObj = new URL(response.data.redirectUrl);
+            // Add the connectionId as a query parameter to our callback URL
+            redirectUrlObj.searchParams.append('connectionId', response.data.id);
+            
+            return {
+              redirectUrl: redirectUrlObj.toString(),
+              state: userId,
+              connectionId: response.data.id
+            };
+          } else {
+            throw new Error('No redirect URL in response');
+          }
+        } catch (error) {
+          console.error('Error initializing Gmail connection:', error.message);
+          if (error.response) {
+            console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+          }
+          
+          // If we fail to initialize the connection, fall back to the hardcoded URL as a last resort
+          console.log('Falling back to hardcoded redirect URL');
+          return {
+            redirectUrl: 'https://backend.composio.dev/s/LqcVWnMM',
+            state: userId,
+            fallback: true
+          };
+        }
       }
       
       // For other services, build the redirect URL
