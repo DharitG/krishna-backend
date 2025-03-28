@@ -4,6 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { requireAuth } = require('./middleware/auth.middleware');
+const { checkRateLimit } = require('./middleware/ratelimit.middleware');
 
 // Initialize express app
 const app = express();
@@ -20,15 +21,19 @@ const composioRoutes = require('./routes/composio.routes');
 const preferencesRoutes = require('./routes/preferences.routes');
 const chatRoutes = require('./routes/chat.routes');
 const accountRoutes = require('./routes/account.routes');
+const webhookRoutes = require('./routes/webhook.routes');
+const subscriptionRoutes = require('./routes/subscription.routes');
 
 // Register routes
-app.use('/api/user', requireAuth, userRoutes);
+app.use('/api/user', requireAuth, checkRateLimit, userRoutes);
 
 // Register Composio routes - public routes must be registered first
 app.use('/api/composio', composioRoutes); // This will handle both public and authenticated routes
-app.use('/api/preferences', requireAuth, preferencesRoutes);
-app.use('/api/chats', requireAuth, chatRoutes);
-app.use('/api/accounts', requireAuth, accountRoutes);
+app.use('/api/preferences', requireAuth, checkRateLimit, preferencesRoutes);
+app.use('/api/chats', requireAuth, checkRateLimit, chatRoutes);
+app.use('/api/accounts', requireAuth, checkRateLimit, accountRoutes);
+app.use('/api/webhooks', webhookRoutes); // No auth for webhooks
+app.use('/api/subscription', subscriptionRoutes); // Some routes require auth, handled in the router
 
 // Public test endpoint (no auth required)
 app.get('/api/test', (req, res) => {
