@@ -16,9 +16,13 @@ const checkRateLimit = async (req, res, next) => {
     // Get user ID from request
     const userId = req.user?.id;
     
-    // If no user ID, skip rate limiting (for public routes)
+    // If no user ID, user is not authenticated - should never happen since this middleware
+    // should always be used after requireAuth middleware, but we'll handle it just in case
     if (!userId) {
-      return next();
+      return res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Authentication required'
+      });
     }
     
     // Check rate limit
@@ -46,8 +50,11 @@ const checkRateLimit = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('Rate limit middleware error:', error);
-    // Continue to the next middleware in case of error
-    next();
+    // Return an error rather than silently continuing
+    res.status(500).json({
+      error: 'Rate limit error',
+      message: 'An error occurred while checking rate limits. Please try again later.'
+    });
   }
 };
 

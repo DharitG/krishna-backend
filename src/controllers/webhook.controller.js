@@ -355,12 +355,13 @@ const handleBillingIssue = async (data) => {
  */
 const clearRateLimitCache = async (userId) => {
   try {
-    // This would typically call your rate limiting service to clear the cache
-    // For now, we'll just log it
-    console.log(`Cleared rate limit cache for user ${userId}`);
+    // Import rate limit service
+    const rateLimitService = require('../services/ratelimit.service');
     
-    // In a real implementation, you would clear the cache in Redis or your cache system
-    // Example: await redis.del(`rate_limit:${userId}`);
+    // Reset the user's cache
+    rateLimitService.resetUserCache(userId);
+    
+    console.log(`Cleared rate limit cache for user ${userId}`);
   } catch (error) {
     console.error('Error clearing rate limit cache:', error);
   }
