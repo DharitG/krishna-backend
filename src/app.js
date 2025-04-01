@@ -27,6 +27,7 @@ app.use(publicRouteRateLimit);
 // Import routes
 const userRoutes = require('./routes/user.routes');
 const composioRoutes = require('./routes/composio.routes');
+const composioController = require('./controllers/composio.controller');
 const preferencesRoutes = require('./routes/preferences.routes');
 const chatRoutes = require('./routes/chat.routes');
 const accountRoutes = require('./routes/account.routes');
@@ -42,6 +43,12 @@ app.use('/api/webhooks', webhookRateLimit, webhookRoutes); // No auth for webhoo
 
 // Register routes that mix public and authenticated endpoints
 app.use('/api/subscription', subscriptionRoutes);
+
+// Register Composio auth routes without authentication requirement
+app.post('/api/composio/auth/init/:service', authRateLimit, composioController.initAuthentication);
+app.post('/api/composio/auth/:service', authRateLimit, composioController.initAuthentication);
+app.get('/api/composio/auth/callback', authRateLimit, composioController.completeAuthentication);
+app.get('/api/composio/auth/status/:service', authRateLimit, composioController.checkAuth);
 
 // Register authenticated routes with subscription tier rate limits
 app.use('/api/user', requireAuth, checkRateLimit, userRoutes);
