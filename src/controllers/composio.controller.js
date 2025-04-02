@@ -86,7 +86,9 @@ exports.initAuthentication = async (req, res, next) => {
  */
 exports.completeAuthentication = async (req, res, next) => {
   try {
-    const { code, state, service, connectedAccountId } = req.query;
+    // Check if we're receiving data from query params (redirect) or request body (API call)
+    const params = Object.keys(req.query).length > 0 ? req.query : req.body;
+    const { code, state, service, connectedAccountId } = params;
     
     console.log('Auth callback received:', { 
       code: code ? 'PRESENT' : 'MISSING', 
@@ -121,13 +123,16 @@ exports.completeAuthentication = async (req, res, next) => {
         code
       });
       
-      // Save connection info to database
+      console.log('Connection info from Composio:', connectionInfo);
+      
+      // Save connection info to database with more details
       const { error } = await supabase
         .from('service_tokens')
         .upsert({
           user_id: userId,
           service_name: service.toLowerCase(),
           access_token: connectionInfo.connectionId, // Store the connection ID
+          connection_status: connectionInfo.status || 'connected',
           created_at: new Date(),
           updated_at: new Date()
         });
@@ -137,16 +142,44 @@ exports.completeAuthentication = async (req, res, next) => {
         return res.status(500).json({ error: 'Failed to save connection info' });
       }
       
-      // Redirect to frontend with success message
+      // For API calls (not redirects), return success response
+      if (Object.keys(req.query).length === 0) {
+        return res.json({
+          success: true,
+          service,
+          authenticated: true,
+          connectionId: connectionInfo.connectionId
+        });
+      }
+      
+      // For redirects, redirect to frontend with success message
       res.redirect(`${process.env.APP_URL}/auth-success?service=${service}`);
     } catch (error) {
       console.error(`Error completing authentication:`, error);
-      // Redirect to frontend with error message
+      
+      // For API calls (not redirects), return error response
+      if (Object.keys(req.query).length === 0) {
+        return res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+      
+      // For redirects, redirect to frontend with error message
       res.redirect(`${process.env.APP_URL}/auth-error?message=${encodeURIComponent(error.message)}`);
     }
   } catch (error) {
     console.error(`Error in authentication callback:`, error);
-    // Redirect to frontend with error message
+    
+    // For API calls (not redirects), return error response
+    if (Object.keys(req.query).length === 0) {
+      return res.status(500).json({
+        success: false,
+        error: 'Unexpected error during authentication'
+      });
+    }
+    
+    // For redirects, redirect to frontend with error message
     res.redirect(`${process.env.APP_URL}/auth-error?message=${encodeURIComponent('Unexpected error during authentication')}`);
   }
 };

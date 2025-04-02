@@ -16,7 +16,13 @@ const app = express();
 
 // Security middleware
 app.use(helmet()); // Security headers
-app.use(cors()); // Enable CORS
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production'
+    ? [process.env.APP_URL, process.env.BACKEND_URL]
+    : '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true
+})); // Configured CORS
 app.use(morgan('dev')); // Request logging
 app.use(express.json()); // Parse JSON request bodies
 

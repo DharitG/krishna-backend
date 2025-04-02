@@ -15,7 +15,9 @@ const server = http.createServer(app);
 // Create Socket.IO server
 const io = new Server(server, {
   cors: {
-    origin: '*', // In production, you should restrict this
+    origin: process.env.NODE_ENV === 'production' 
+      ? [process.env.APP_URL, process.env.BACKEND_URL] // Only allow connections from our app in production
+      : '*', // Allow all in development
     methods: ['GET', 'POST']
   }
 });
@@ -58,8 +60,15 @@ const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`API base URL: http://localhost:${PORT}/api`);
-      console.log(`WebSocket server running on ws://localhost:${PORT}`);
+      
+      // Use BACKEND_URL from environment instead of hardcoded localhost
+      const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
+      console.log(`API base URL: ${backendUrl}/api`);
+      
+      // For WebSocket, derive from the backend URL
+      const wsUrl = backendUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+      console.log(`WebSocket server running on ${wsUrl}`);
+      
       console.log(`Supabase: Connected ✅`);
     });
   } catch (error) {

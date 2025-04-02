@@ -1,23 +1,38 @@
 const { OpenAIToolSet } = require('composio-core');
 const { supabase } = require('./supabase');
+const axios = require('axios');
 
 class ComposioService {
   constructor() {
     this.apiKey = process.env.COMPOSIO_API_KEY;
+    this.apiUrl = process.env.COMPOSIO_API_URL || 'https://backend.composio.dev';
     this.gmailIntegrationId = process.env.GMAIL_INTEGRATION_ID;
-    console.log(`Initializing Composio service with SDK`);
+    console.log(`Initializing Composio service with SDK. API URL: ${this.apiUrl}`);
     
     if (!this.apiKey) {
       console.error('Composio service not configured. API key is missing.');
+      this.isConfigured = false;
       return;
     }
     
-    // Initialize the SDK
-    this.toolset = new OpenAIToolSet({ apiKey: this.apiKey });
-    this.isConfigured = true;
+    if (!this.gmailIntegrationId) {
+      console.warn('Gmail integration ID is missing. Gmail authentication will not work.');
+    }
     
-    // Test connection
-    this.testConnection();
+    // Initialize the SDK with API URL
+    try {
+      this.toolset = new OpenAIToolSet({ 
+        apiKey: this.apiKey,
+        apiUrl: this.apiUrl
+      });
+      this.isConfigured = true;
+      
+      // Test connection
+      this.testConnection();
+    } catch (error) {
+      console.error('Failed to initialize Composio SDK:', error.message);
+      this.isConfigured = false;
+    }
   }
   
   /**
@@ -143,16 +158,34 @@ class ComposioService {
     }
     
     try {
+      // Determine the correct integration ID based on service
+      let integrationId;
+      
+      if (service.toLowerCase() === 'gmail') {
+        integrationId = this.gmailIntegrationId;
+        if (!integrationId) {
+          console.warn('Gmail integration ID not configured');
+          return false;
+        }
+      } else {
+        // For future services, we would add mappings here
+        console.warn(`No integration ID mapping for service: ${service}`);
+        return false;
+      }
+      
       // List connected accounts
       const connections = await this.toolset.connectedAccounts.list({
-        integrationId: this.gmailIntegrationId,
+        integrationId: integrationId,
         entityId: `user-${userId}`
       });
       
       // Check if any connection is active
-      return connections.some(conn => conn.connectionStatus === 'connected');
+      const isAuthenticated = connections.some(conn => conn.connectionStatus === 'connected');
+      console.log(`Authentication status for ${service} (user ${userId}): ${isAuthenticated ? 'Authenticated' : 'Not authenticated'}`);
+      
+      return isAuthenticated;
     } catch (error) {
-      console.error('Error checking authentication:', error.message);
+      console.error(`Error checking authentication for ${service}:`, error.message);
       return false;
     }
   }
@@ -258,7 +291,7 @@ class ComposioService {
       
       // Make request to Composio API to get available tools
       const response = await axios.get(
-        `${this.baseUrl}/tools`,
+        `${this.apiUrl}/tools`,
         {
           params: {
             actions: actions.join(','),
@@ -362,7 +395,7 @@ class ComposioService {
       
       // Make request to Composio API to execute the tool
       const response = await axios.post(
-        `${this.baseUrl}/tools/execute`,
+        `${this.apiUrl}/tools/execute`,
         {
           name: functionName,
           arguments: args,
