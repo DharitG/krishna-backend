@@ -12,14 +12,14 @@ router.get('/test', (req, res) => {
 // so they can be registered without requireAuth middleware
 
 // Tool management (require authentication)
-router.get('/tools', composioController.getTools);
+router.get('/tools', requireAuth, composioController.getTools);
 
 // Find actions by use case description
-router.post('/actions/search', composioController.findActionsByUseCase);
+router.post('/actions/search', requireAuth, composioController.findActionsByUseCase);
 
 // Execute a specific action directly
 router.post('/actions/execute', requireAuth, composioController.executeAction);
-router.post('/tools/check-auth', composioController.checkToolAuth);
-router.post('/tools/execute', composioController.executeToolCall);
+router.post('/tools/check-auth', requireAuth, composioController.checkToolAuth);
+router.post('/tools/execute', requireAuth, composioController.executeToolCall);
 
 module.exports = router;

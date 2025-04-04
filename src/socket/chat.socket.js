@@ -36,13 +36,13 @@ const handleChatSocket = (io, socket) => {
   // Join a chat room
   socket.on('join_chat', (chatId) => {
     socket.join(`chat_${chatId}`);
-    console.log(`User ${socket.user?.id || 'anonymous'} joined chat room: chat_${chatId}`);
+    console.log(`User ${socket.user.id} joined chat room: chat_${chatId}`);
   });
   
   // Leave a chat room
   socket.on('leave_chat', (chatId) => {
     socket.leave(`chat_${chatId}`);
-    console.log(`User ${socket.user?.id || 'anonymous'} left chat room: chat_${chatId}`);
+    console.log(`User ${socket.user.id} left chat room: chat_${chatId}`);
   });
   
   // Handle new message
@@ -56,7 +56,7 @@ const handleChatSocket = (io, socket) => {
       });
       
       const { messages, enabledTools = [], useTools = true, chatId, authStatus = {} } = data;
-      const userId = socket.user?.id || 'anonymous';
+      const userId = socket.user.id;
       
       // Validate input
       if (!Array.isArray(messages) || messages.length === 0) {

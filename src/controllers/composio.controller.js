@@ -11,7 +11,7 @@ const axios = require('axios');
 exports.initAuthentication = async (req, res, next) => {
   try {
     const { service } = req.params;
-    const userId = req.user ? req.user.id : 'anonymous-user';
+    const userId = req.user.id;
     
     console.log(`Initializing authentication for service: ${service}, userId: ${userId}`);
     
@@ -202,7 +202,7 @@ exports.findActionsByUseCase = async (req, res, next) => {
     }
     
     // Get user ID from auth token if available
-    const userId = req.user?.id || 'anonymous';
+    const userId = req.user.id;
     
     // Find actions by use case
     const actions = await composioService.findActionsByUseCase(useCase, advanced, apps);
@@ -554,7 +554,7 @@ exports.checkToolAuth = async (req, res, next) => {
  */
 exports.checkAuth = async (req, res, next) => {
   try {
-    const userId = req.user ? req.user.id : 'anonymous-user';
+    const userId = req.user.id;
     const { service } = req.params;
     
     // Validate service name
@@ -563,13 +563,7 @@ exports.checkAuth = async (req, res, next) => {
     }
     
     // If we don't have a user ID, return not authenticated
-    if (userId === 'anonymous-user') {
-      return res.json({
-        authenticated: false,
-        service,
-        message: 'User not logged in'
-      });
-    }
+    // Authentication is now required by middleware
     
     // Check if the user has a token for this service
     const { data: token, error } = await supabase

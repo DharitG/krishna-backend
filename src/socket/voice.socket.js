@@ -36,13 +36,13 @@ const handleVoiceSocket = (io, socket) => {
   // Join a voice session
   socket.on('join_voice_session', (sessionId) => {
     socket.join(`voice_${sessionId}`);
-    console.log(`User ${socket.user?.id || 'anonymous'} joined voice session: voice_${sessionId}`);
+    console.log(`User ${socket.user.id} joined voice session: voice_${sessionId}`);
   });
   
   // Leave a voice session
   socket.on('leave_voice_session', (sessionId) => {
     socket.leave(`voice_${sessionId}`);
-    console.log(`User ${socket.user?.id || 'anonymous'} left voice session: voice_${sessionId}`);
+    console.log(`User ${socket.user.id} left voice session: voice_${sessionId}`);
   });
   
   // Handle audio data
@@ -85,7 +85,7 @@ const handleVoiceSocket = (io, socket) => {
         const enabledTools = data.enabledTools || [];
         
         // Stream the response
-        const stream = await langchainService.getStreamingAgentResponse(messages, enabledTools, socket.user?.id || 'default-user');
+        const stream = await langchainService.getStreamingAgentResponse(messages, enabledTools, socket.user.id);
         
         // Process the stream
         for await (const chunk of stream) {

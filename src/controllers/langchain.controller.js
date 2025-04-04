@@ -15,7 +15,7 @@ exports.processMessage = async (req, res, next) => {
     }
     
     // Get user ID from auth token
-    const userId = req.user?.id || 'anonymous';
+    const userId = req.user.id;
     
     // Get authentication status from the request
     const authStatus = req.body.authStatus || {};
@@ -45,7 +45,7 @@ exports.getStreamingResponse = async (req, res, next) => {
     }
     
     // Get user ID from auth token
-    const userId = req.user?.id || 'anonymous';
+    const userId = req.user.id;
     
     // Get authentication status from the request
     const authStatus = req.body.authStatus || {};
@@ -85,7 +85,7 @@ exports.createDomainSpecificAgent = async (req, res, next) => {
     }
     
     // Get user ID from auth token
-    const userId = req.user?.id || 'anonymous';
+    const userId = req.user.id;
     
     // Create a domain-specific agent
     const agent = await langchainService.createDomainSpecificAgent(userId, useCase, advanced, apps);
@@ -125,7 +125,7 @@ exports.processDomainSpecificMessage = async (req, res, next) => {
     }
     
     // Get user ID from auth token
-    const userId = req.user?.id || 'anonymous';
+    const userId = req.user.id;
     
     // Get authentication status from the request
     const authStatus = req.body.authStatus || {};

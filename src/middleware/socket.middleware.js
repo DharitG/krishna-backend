@@ -14,10 +14,8 @@ const authenticateSocket = async (socket, next) => {
     
     if (!token) {
       console.warn('No authentication token provided for socket connection');
-      // Allow connection without authentication for now
-      // You can restrict this in production
-      socket.user = { id: 'anonymous', anonymous: true };
-      return next();
+      // Reject unauthenticated connections
+      return next(new Error('Authentication required'));
     }
     
     // Verify the JWT token with Supabase
@@ -25,10 +23,8 @@ const authenticateSocket = async (socket, next) => {
     
     if (error || !data.user) {
       console.error('Socket authentication error:', error);
-      // Allow connection without authentication for now
-      // You can restrict this in production
-      socket.user = { id: 'anonymous', anonymous: true };
-      return next();
+      // Reject connections with invalid authentication
+      return next(new Error('Invalid authentication token'));
     }
     
     // Attach user data to the socket
@@ -38,10 +34,8 @@ const authenticateSocket = async (socket, next) => {
     next();
   } catch (error) {
     console.error('Socket authentication error:', error);
-    // Allow connection without authentication for now
-    // You can restrict this in production
-    socket.user = { id: 'anonymous', anonymous: true };
-    next();
+    // Reject connections when authentication fails
+    next(new Error('Authentication failed: ' + error.message));
   }
 };
 
