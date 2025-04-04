@@ -34,6 +34,7 @@ app.use(publicRouteRateLimit);
 const userRoutes = require('./routes/user.routes');
 const composioRoutes = require('./routes/composio.routes');
 const composioController = require('./controllers/composio.controller');
+const langchainRoutes = require('./routes/langchain.routes');
 const preferencesRoutes = require('./routes/preferences.routes');
 const chatRoutes = require('./routes/chat.routes');
 const accountRoutes = require('./routes/account.routes');
@@ -59,6 +60,7 @@ app.get('/api/composio/auth/status/:service', authRateLimit, composioController.
 // Register authenticated routes with subscription tier rate limits
 app.use('/api/user', requireAuth, checkRateLimit, userRoutes);
 app.use('/api/composio', requireAuth, checkRateLimit, composioRoutes);
+app.use('/api/langchain', requireAuth, checkRateLimit, langchainRoutes);
 app.use('/api/preferences', requireAuth, checkRateLimit, preferencesRoutes);
 app.use('/api/chats', requireAuth, checkRateLimit, chatRoutes);
 app.use('/api/accounts', requireAuth, checkRateLimit, accountRoutes);
@@ -66,6 +68,19 @@ app.use('/api/accounts', requireAuth, checkRateLimit, accountRoutes);
 // Public test endpoint (no auth required) - safe for basic connectivity testing
 app.get('/api/test', (req, res) => {
   res.status(200).json({ message: 'Backend API is working!', auth: false });
+});
+
+// Public test endpoint for use-case search (no auth required) - for testing only
+app.post('/api/test/use-case-search', async (req, res) => {
+  try {
+    const { useCase, advanced = false, apps = [] } = req.body;
+    const composioService = require('./services/composio.service');
+    const actions = await composioService.findActionsByUseCase(useCase, advanced, apps);
+    res.status(200).json({ actions });
+  } catch (error) {
+    console.error('Error in test use-case search:', error);
+    res.status(500).json({ message: 'Error in test use-case search', error: error.message });
+  }
 });
 
 // Health check endpoint (no auth required) - necessary for deployment health checks

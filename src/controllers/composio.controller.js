@@ -187,6 +187,64 @@ exports.completeAuthentication = async (req, res, next) => {
 /**
  * Get available tools from Composio
  */
+/**
+ * Find actions by use case description
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Function} next - Express next middleware function
+ */
+exports.findActionsByUseCase = async (req, res, next) => {
+  try {
+    const { useCase, advanced = false, apps = [] } = req.body;
+    
+    if (!useCase) {
+      return res.status(400).json({ error: 'Use case description is required' });
+    }
+    
+    // Get user ID from auth token if available
+    const userId = req.user?.id || 'anonymous';
+    
+    // Find actions by use case
+    const actions = await composioService.findActionsByUseCase(useCase, advanced, apps);
+    
+    res.json({ actions });
+  } catch (error) {
+    console.error('Error finding actions by use case:', error);
+    next(error);
+  }
+};
+
+/**
+ * Execute a specific action directly
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Function} next - Express next middleware function
+ */
+exports.executeAction = async (req, res, next) => {
+  try {
+    const { action, params = {} } = req.body;
+    
+    if (!action) {
+      return res.status(400).json({ error: 'Action name is required' });
+    }
+    
+    // Get user ID from auth token
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    // Execute the action
+    const result = await composioService.executeAction(action, params, userId);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Error executing action:', error);
+    next(error);
+  }
+};
+
 exports.getTools = async (req, res, next) => {
   try {
     const { actions } = req.query;

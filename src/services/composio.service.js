@@ -281,22 +281,37 @@ class ComposioService {
    * Get available tools from Composio
    * @param {Array} actions - List of actions to filter by
    * @param {string} userId - User ID
+   * @param {Array} apps - Optional list of apps to filter by
+   * @param {Array} tags - Optional list of tags to filter by
    * @returns {Array} - List of available tools
    */
-  async getTools(actions = [], userId) {
+  async getTools(actions = [], userId, apps = [], tags = []) {
     try {
       if (!this.isConfigured) {
         throw new Error('Composio API key not configured');
+      }
+      
+      // Prepare params object
+      const params = { userId };
+      
+      // Add optional parameters if provided
+      if (actions && actions.length > 0) {
+        params.actions = actions.join(',');
+      }
+      
+      if (apps && apps.length > 0) {
+        params.apps = apps.join(',');
+      }
+      
+      if (tags && tags.length > 0) {
+        params.tags = tags.join(',');
       }
       
       // Make request to Composio API to get available tools
       const response = await axios.get(
         `${this.apiUrl}/tools`,
         {
-          params: {
-            actions: actions.join(','),
-            userId: userId
-          },
+          params,
           headers: {
             'x-api-key': this.apiKey
           }
@@ -306,6 +321,52 @@ class ComposioService {
       return response.data.tools || [];
     } catch (error) {
       console.error('Error fetching tools from Composio:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Find actions by use case description
+   * @param {string} useCase - Description of what the user is trying to accomplish
+   * @param {boolean} advanced - Whether to return multiple tools for complex workflows
+   * @param {Array} apps - Optional list of apps to filter by
+   * @returns {Array} - List of action names matching the use case
+   */
+  async findActionsByUseCase(useCase, advanced = false, apps = []) {
+    try {
+      if (!this.isConfigured) {
+        throw new Error('Composio API key not configured');
+      }
+      
+      if (!useCase || typeof useCase !== 'string') {
+        throw new Error('Use case description is required');
+      }
+      
+      // Prepare params object
+      const params = {
+        query: useCase,
+        advanced: advanced
+      };
+      
+      // Add optional app filter if provided
+      if (apps && apps.length > 0) {
+        params.apps = apps.join(',');
+      }
+      
+      // Make request to Composio API to search for actions by use case
+      const response = await axios.get(
+        `${this.apiUrl}/actions/search`,
+        {
+          params,
+          headers: {
+            'x-api-key': this.apiKey
+          }
+        }
+      );
+      
+      return response.data.actions || [];
+    } catch (error) {
+      console.error('Error searching for actions by use case:', error);
       throw error;
     }
   }
@@ -434,5 +495,7 @@ class ComposioService {
     }
   }
 }
+
+
 
 module.exports = new ComposioService();

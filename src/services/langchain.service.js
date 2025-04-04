@@ -50,6 +50,40 @@ class LangChainService {
     }
   }
 
+  /**
+   * Create a domain-specific agent based on a use case description
+   * @param {string} userId - User ID
+   * @param {string} useCase - Description of what the user is trying to accomplish
+   * @param {boolean} advanced - Whether to return multiple tools for complex workflows
+   * @param {Array} apps - Optional list of apps to filter by
+   * @returns {Object} - Agent instance
+   */
+  async createDomainSpecificAgent(userId, useCase, advanced = false, apps = []) {
+    if (!this.isConfigured) {
+      throw new Error('LangChain service not fully configured');
+    }
+    
+    try {
+      // Find actions that match the use case
+      const actions = await composioService.findActionsByUseCase(useCase, advanced, apps);
+      
+      if (!actions || actions.length === 0) {
+        console.warn(`No actions found for use case: ${useCase}`);
+        // Fall back to creating a general agent with no specific tools
+        return this.createAgent(userId, []);
+      }
+      
+      console.log(`Creating domain-specific agent for use case: ${useCase}`);
+      console.log(`Found ${actions.length} matching actions:`, actions);
+      
+      // Create an agent with the specific actions found
+      return this.createAgent(userId, actions);
+    } catch (error) {
+      console.error('Error creating domain-specific agent:', error);
+      throw error;
+    }
+  }
+  
   async createAgent(userId, enabledTools = [], authStatus = {}) {
     if (!this.isConfigured) {
       throw new Error('LangChain service not fully configured');

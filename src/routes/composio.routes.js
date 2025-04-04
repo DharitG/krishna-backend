@@ -13,6 +13,12 @@ router.get('/test', (req, res) => {
 
 // Tool management (require authentication)
 router.get('/tools', composioController.getTools);
+
+// Find actions by use case description
+router.post('/actions/search', composioController.findActionsByUseCase);
+
+// Execute a specific action directly
+router.post('/actions/execute', requireAuth, composioController.executeAction);
 router.post('/tools/check-auth', composioController.checkToolAuth);
 router.post('/tools/execute', composioController.executeToolCall);
 
