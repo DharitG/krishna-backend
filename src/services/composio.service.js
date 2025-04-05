@@ -7,7 +7,14 @@ class ComposioService {
     this.apiKey = process.env.COMPOSIO_API_KEY;
     this.apiUrl = process.env.COMPOSIO_API_URL || 'https://backend.composio.dev';
     this.gmailIntegrationId = process.env.GMAIL_INTEGRATION_ID;
+    
+    // White-labeling configuration
+    this.useCustomOAuth = process.env.USE_CUSTOM_OAUTH === 'true';
+    this.customRedirectUrl = process.env.CUSTOM_REDIRECT_URL;
+    this.appSuccessUrl = process.env.APP_URL || 'https://yourapp.com/success';
+    
     console.log(`Initializing Composio service with SDK. API URL: ${this.apiUrl}`);
+    console.log(`White-labeling enabled: ${this.useCustomOAuth}`);
     
     if (!this.apiKey) {
       console.error('Composio service not configured. API key is missing.');
@@ -64,10 +71,10 @@ class ComposioService {
       throw new Error('Composio API key not configured');
     }
     
+    console.log(`Initializing authentication for service: ${service}`);
+    
     // Use the appropriate integration ID based on the service
     let integrationId;
-    
-    console.log(`Initializing authentication for service: ${service}`);
     
     if (service.toLowerCase() === 'gmail') {
       // For Gmail, use the configured integration ID
@@ -77,7 +84,6 @@ class ComposioService {
       }
     } else {
       // For other services, we would need to map the service name to an integration ID
-      // This is a placeholder - you'll need to add support for other services as needed
       throw new Error(`Service "${service}" is not supported yet`);
     }
     
@@ -91,11 +97,20 @@ class ComposioService {
       
       console.log(`Got integration details for ${service}: ${integration.id}`);
       
-      // Initialize connection
-      const connectedAccount = await this.toolset.connectedAccounts.initiate({
+      // Initialize connection with appropriate parameters
+      const initParams = {
         integrationId: integration.id,
-        entityId: `user-${userId}`, // Use userId as the entity identifier
-      });
+        entityId: `user-${userId}` // Use userId as the entity identifier
+      };
+      
+      // If white-labeling is enabled and we have a custom redirect URL, use it
+      if (this.useCustomOAuth && this.customRedirectUrl) {
+        console.log(`Using custom OAuth with redirect URL: ${this.customRedirectUrl}`);
+        initParams.useComposioAuth = false;
+        initParams.redirectUri = this.appSuccessUrl; // Where to redirect after auth completes
+      }
+      
+      const connectedAccount = await this.toolset.connectedAccounts.initiate(initParams);
       
       console.log(`Created connected account: ${connectedAccount.connectedAccountId}`);
       console.log(`Redirect URL: ${connectedAccount.redirectUrl}`);
@@ -104,7 +119,8 @@ class ComposioService {
       return {
         redirectUrl: connectedAccount.redirectUrl,
         connectionId: connectedAccount.connectedAccountId,
-        state: userId
+        state: userId,
+        customAuth: this.useCustomOAuth
       };
     } catch (error) {
       console.error(`Error initializing authentication for ${service}:`, error.message);

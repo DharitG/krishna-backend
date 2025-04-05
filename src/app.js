@@ -41,6 +41,7 @@ const accountRoutes = require('./routes/account.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const subscriptionRoutes = require('./routes/subscription.routes');
 const authRoutes = require('./routes/auth.routes');
+const oauthRedirectRoutes = require('./routes/oauth-redirect.routes');
 
 // Apply stricter rate limits to authentication routes
 app.use('/api/auth', authRateLimit, authRoutes);
@@ -51,11 +52,11 @@ app.use('/api/webhooks', webhookRateLimit, webhookRoutes); // No auth for webhoo
 // Register routes that mix public and authenticated endpoints
 app.use('/api/subscription', subscriptionRoutes);
 
-// Register Composio auth routes without authentication requirement
-app.post('/api/composio/auth/init/:service', authRateLimit, composioController.initAuthentication);
-app.post('/api/composio/auth/:service', authRateLimit, composioController.initAuthentication);
+// Register Composio auth routes with authentication requirement
+app.post('/api/composio/auth/init/:service', requireAuth, authRateLimit, composioController.initAuthentication);
+app.post('/api/composio/auth/:service', requireAuth, authRateLimit, composioController.initAuthentication);
 app.get('/api/composio/auth/callback', authRateLimit, composioController.completeAuthentication);
-app.get('/api/composio/auth/status/:service', authRateLimit, composioController.checkAuth);
+app.get('/api/composio/auth/status/:service', requireAuth, authRateLimit, composioController.checkAuth);
 
 // Register authenticated routes with subscription tier rate limits
 app.use('/api/user', requireAuth, checkRateLimit, userRoutes);
@@ -64,6 +65,9 @@ app.use('/api/langchain', requireAuth, checkRateLimit, langchainRoutes);
 app.use('/api/preferences', requireAuth, checkRateLimit, preferencesRoutes);
 app.use('/api/chats', requireAuth, checkRateLimit, chatRoutes);
 app.use('/api/accounts', requireAuth, checkRateLimit, accountRoutes);
+
+// Register OAuth redirect routes (no auth required - these are public endpoints for OAuth callbacks)
+app.use('/oauth', oauthRedirectRoutes);
 
 // Public test endpoint (no auth required) - safe for basic connectivity testing
 app.get('/api/test', (req, res) => {
