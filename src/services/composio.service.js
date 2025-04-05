@@ -6,7 +6,30 @@ class ComposioService {
   constructor() {
     this.apiKey = process.env.COMPOSIO_API_KEY;
     this.apiUrl = process.env.COMPOSIO_API_URL || 'https://backend.composio.dev';
-    this.gmailIntegrationId = process.env.GMAIL_INTEGRATION_ID;
+    
+    // Integration IDs
+    // Google Super App
+    this.googleIntegrationId = process.env.GOOGLE_INTEGRATION_ID;
+    
+    // Other services
+    this.outlookIntegrationId = process.env.OUTLOOK_INTEGRATION_ID;
+    this.slackIntegrationId = process.env.SLACK_INTEGRATION_ID;
+    this.discordIntegrationId = process.env.DISCORD_INTEGRATION_ID;
+    this.notionIntegrationId = process.env.NOTION_INTEGRATION_ID;
+    this.blackboardIntegrationId = process.env.BLACKBOARD_INTEGRATION_ID;
+    this.trelloIntegrationId = process.env.TRELLO_INTEGRATION_ID;
+    this.twitterIntegrationId = process.env.TWITTER_INTEGRATION_ID;
+    this.linkedinIntegrationId = process.env.LINKEDIN_INTEGRATION_ID;
+    this.redditIntegrationId = process.env.REDDIT_INTEGRATION_ID;
+    this.weathermapIntegrationId = process.env.WEATHERMAP_INTEGRATION_ID;
+    this.canvasIntegrationId = process.env.CANVAS_INTEGRATION_ID;
+    this.dropboxIntegrationId = process.env.DROPBOX_INTEGRATION_ID;
+    this.onedriveIntegrationId = process.env.ONEDRIVE_INTEGRATION_ID;
+    this.youtubeIntegrationId = process.env.YOUTUBE_INTEGRATION_ID;
+    this.zoomIntegrationId = process.env.ZOOM_INTEGRATION_ID;
+    this.calendlyIntegrationId = process.env.CALENDLY_INTEGRATION_ID;
+    this.githubIntegrationId = process.env.GITHUB_INTEGRATION_ID;
+    this.perplexityaiIntegrationId = process.env.PERPLEXITYAI_INTEGRATION_ID;
     
     // White-labeling configuration
     this.useCustomOAuth = process.env.USE_CUSTOM_OAUTH === 'true';
@@ -22,8 +45,8 @@ class ComposioService {
       return;
     }
     
-    if (!this.gmailIntegrationId) {
-      console.warn('Gmail integration ID is missing. Gmail authentication will not work.');
+    if (!this.googleIntegrationId) {
+      console.warn('Google integration ID is missing. Google services authentication will not work.');
     }
     
     // Initialize the SDK with API URL
@@ -62,7 +85,7 @@ class ComposioService {
   
   /**
    * Initialize authentication for a service
-   * @param {string} service - Service name (e.g., 'gmail')
+   * @param {string} service - Service name (e.g., 'google', 'slack')
    * @param {string} userId - User ID
    * @returns {Object} - Authentication info with redirectUrl
    */
@@ -76,15 +99,37 @@ class ComposioService {
     // Use the appropriate integration ID based on the service
     let integrationId;
     
-    if (service.toLowerCase() === 'gmail') {
-      // For Gmail, use the configured integration ID
-      integrationId = this.gmailIntegrationId;
-      if (!integrationId) {
-        throw new Error('Gmail integration ID not configured');
-      }
-    } else {
-      // For other services, we would need to map the service name to an integration ID
-      throw new Error(`Service "${service}" is not supported yet`);
+    // Normalize service name to lowercase
+    const normalizedService = service.toLowerCase();
+    
+    // Map service names to integration IDs
+    const integrationMap = {
+      'google': this.googleIntegrationId,
+      'gmail': this.googleIntegrationId, // Legacy support
+      'outlook': this.outlookIntegrationId,
+      'slack': this.slackIntegrationId,
+      'discord': this.discordIntegrationId,
+      'notion': this.notionIntegrationId,
+      'blackboard': this.blackboardIntegrationId,
+      'trello': this.trelloIntegrationId,
+      'twitter': this.twitterIntegrationId,
+      'linkedin': this.linkedinIntegrationId,
+      'reddit': this.redditIntegrationId,
+      'weathermap': this.weathermapIntegrationId,
+      'canvas': this.canvasIntegrationId,
+      'dropbox': this.dropboxIntegrationId,
+      'onedrive': this.onedriveIntegrationId,
+      'youtube': this.youtubeIntegrationId,
+      'zoom': this.zoomIntegrationId,
+      'calendly': this.calendlyIntegrationId,
+      'github': this.githubIntegrationId,
+      'perplexityai': this.perplexityaiIntegrationId
+    };
+    
+    integrationId = integrationMap[normalizedService];
+    
+    if (!integrationId) {
+      throw new Error(`Service "${service}" is not supported or integration ID not configured`);
     }
     
     try {
@@ -442,14 +487,104 @@ class ComposioService {
       
       // Determine the service from the function name
       const serviceMap = {
-        'gmail': 'gmail',
-        'sendEmail': 'gmail',
-        'readEmails': 'gmail',
+        // Google Super App
+        'gmail': 'google',
+        'sendEmail': 'google',
+        'readEmails': 'google',
+        'googleCalendar': 'google',
+        'createEvent': 'google',
+        'listEvents': 'google',
+        'googleDrive': 'google',
+        'listFiles': 'google',
+        'uploadFile': 'google',
+        'googleTasks': 'google',
+        'createTask': 'google',
+        'listTasks': 'google',
+        
+        // Outlook
+        'outlook': 'outlook',
+        'outlookEmail': 'outlook',
+        'outlookCalendar': 'outlook',
+        
+        // Slack
+        'slack': 'slack',
+        'sendMessage': 'slack',
+        'readChannels': 'slack',
+        
+        // Discord
+        'discord': 'discord',
+        'discordMessage': 'discord',
+        'discordChannels': 'discord',
+        
+        // Notion
+        'notion': 'notion',
+        'notionPages': 'notion',
+        'notionDatabases': 'notion',
+        
+        // Blackboard
+        'blackboard': 'blackboard',
+        'blackboardCourses': 'blackboard',
+        'blackboardAssignments': 'blackboard',
+        
+        // Trello
+        'trello': 'trello',
+        'trelloBoards': 'trello',
+        'trelloCards': 'trello',
+        
+        // Twitter
+        'twitter': 'twitter',
+        'twitterTweet': 'twitter',
+        'twitterTimeline': 'twitter',
+        
+        // LinkedIn
+        'linkedin': 'linkedin',
+        'linkedinProfile': 'linkedin',
+        'linkedinPosts': 'linkedin',
+        
+        // Reddit
+        'reddit': 'reddit',
+        'redditPosts': 'reddit',
+        'redditSubreddits': 'reddit',
+        
+        // WeatherMap
+        'weathermap': 'weathermap',
+        'getWeather': 'weathermap',
+        'getForecast': 'weathermap',
+        
+        // Canvas
+        'canvas': 'canvas',
+        'canvasCourses': 'canvas',
+        'canvasAssignments': 'canvas',
+        
+        // Dropbox/OneDrive
+        'dropbox': 'dropbox',
+        'dropboxFiles': 'dropbox',
+        'onedrive': 'onedrive',
+        'onedriveFiles': 'onedrive',
+        
+        // YouTube
+        'youtube': 'youtube',
+        'youtubeVideos': 'youtube',
+        'youtubeSearch': 'youtube',
+        
+        // Zoom
+        'zoom': 'zoom',
+        'zoomMeetings': 'zoom',
+        'scheduleZoom': 'zoom',
+        
+        // Calendly
+        'calendly': 'calendly',
+        'calendlyEvents': 'calendly',
+        'calendlySchedule': 'calendly',
+        
+        // GitHub
         'github': 'github',
         'createIssue': 'github',
         'createPullRequest': 'github',
-        'slack': 'slack',
-        'sendMessage': 'slack',
+        
+        // PerplexityAI
+        'perplexityai': 'perplexityai',
+        'perplexitySearch': 'perplexityai',
       };
       
       let service = null;
