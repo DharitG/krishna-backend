@@ -5,10 +5,10 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const { requireAuth } = require('./middleware/auth.middleware');
 const { checkRateLimit } = require('./middleware/ratelimit.middleware');
-const { 
-  publicRouteRateLimit, 
-  authRateLimit, 
-  webhookRateLimit 
+const {
+  publicRouteRateLimit,
+  authRateLimit,
+  webhookRateLimit
 } = require('./middleware/ip-ratelimit.middleware');
 
 // Initialize express app
@@ -42,6 +42,7 @@ const webhookRoutes = require('./routes/webhook.routes');
 const subscriptionRoutes = require('./routes/subscription.routes');
 const authRoutes = require('./routes/auth.routes');
 const oauthRedirectRoutes = require('./routes/oauth-redirect.routes');
+const memoryRoutes = require('./routes/memory.routes');
 
 // Apply stricter rate limits to authentication routes
 app.use('/api/auth', authRateLimit, authRoutes);
@@ -65,6 +66,7 @@ app.use('/api/langchain', requireAuth, checkRateLimit, langchainRoutes);
 app.use('/api/preferences', requireAuth, checkRateLimit, preferencesRoutes);
 app.use('/api/chats', requireAuth, checkRateLimit, chatRoutes);
 app.use('/api/accounts', requireAuth, checkRateLimit, accountRoutes);
+app.use('/api/memory', requireAuth, checkRateLimit, memoryRoutes);
 
 // Register OAuth redirect routes (no auth required - these are public endpoints for OAuth callbacks)
 app.use('/oauth', oauthRedirectRoutes);

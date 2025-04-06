@@ -9,6 +9,7 @@ This is the backend API for the August AI Super Agent mobile app. It handles aut
 - Integration with Azure OpenAI for AI conversations
 - Composio integration for tool capabilities (GitHub, Gmail, Slack, etc.)
 - User preferences and settings management
+- Cross-conversation memory system with pgvector
 
 ## Technology Stack
 
@@ -16,6 +17,7 @@ This is the backend API for the August AI Super Agent mobile app. It handles aut
 - **Supabase**: Authentication and database
 - **Azure OpenAI**: AI chat capabilities
 - **Composio**: Tool integrations for productivity
+- **pgvector**: Vector storage for memory system
 
 ## Getting Started
 
@@ -46,6 +48,11 @@ COMPOSIO_API_KEY=your-composio-api-key
 AZURE_OPENAI_API_KEY=your-azure-api-key
 AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com
 AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=your-embedding-deployment-name
+
+# OpenAI Configuration (alternative to Azure)
+# OPENAI_API_KEY=your-openai-api-key
+# OPENAI_EMBEDDING_MODEL=text-embedding-large
 ```
 
 ## Development

@@ -36,7 +36,19 @@ Install the required npm packages:
 npm install
 ```
 
-## Step 4: Start the Server
+## Step 4: Initialize the Database and Memory System
+
+Run the following commands to set up the database schema and memory system:
+
+```bash
+npm run init-db     # Initialize the database schema
+npm run init-memory # Initialize the memory system with pgvector
+
+# Or run both at once:
+npm run init-all
+```
+
+## Step 5: Start the Server
 
 For development:
 
