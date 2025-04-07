@@ -4,6 +4,7 @@ const { pull } = require("langchain/hub");
 const { LangchainToolSet } = require("composio-core");
 const { AUGUST_SYSTEM_PROMPT } = require("../config/august-system-prompt");
 const composioService = require("./composio.service");
+const memoryService = require('./memory.service'); // Import memory service
 
 class LangChainService {
   constructor() {
@@ -281,10 +282,38 @@ class LangChainService {
       
       // Get the last user message
       const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
-      
+
+      // --- Start Memory Retrieval ---
+      let retrievedMemoryContext = '';
+      const memoryQuery = lastUserMessage.content;
+      try {
+        console.log(`(Streaming) Retrieving memories for query: "${memoryQuery}"`);
+        const relevantMemories = await memoryService.retrieveMemories({
+          query: memoryQuery,
+          userId: userId,
+          limit: 3 // Retrieve top 3 relevant memories
+        });
+
+        if (relevantMemories && relevantMemories.length > 0) {
+          retrievedMemoryContext = "Relevant information from past conversations:\n" +
+            relevantMemories.map(mem => `- ${mem.content}`).join("\n") +
+            "\n---\n"; // Add separator
+          console.log("(Streaming) Retrieved memory context:", retrievedMemoryContext);
+        } else {
+          console.log("(Streaming) No relevant memories found.");
+        }
+      } catch (memoryError) {
+        console.error("(Streaming) Error retrieving memories:", memoryError);
+        // Continue without memory context if retrieval fails
+      }
+      // --- End Memory Retrieval ---
+
+      // Prepend memory context to the input
+      const agentInput = retrievedMemoryContext + lastUserMessage.content;
+
       // Create a streaming response
       const stream = await agentExecutor.streamEvents({
-        input: lastUserMessage.content,
+        input: agentInput, // Use modified input with memory context
         chat_history: history.slice(0, -1) // Exclude the last message as it's the input
       }, {
         version: "v1",
@@ -377,10 +406,38 @@ class LangChainService {
       
       // Get the last user message
       const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
-      
+
+      // --- Start Memory Retrieval ---
+      let retrievedMemoryContext = '';
+      const memoryQuery = lastUserMessage.content;
+      try {
+        console.log(`Retrieving memories for query: "${memoryQuery}"`);
+        const relevantMemories = await memoryService.retrieveMemories({
+          query: memoryQuery,
+          userId: userId,
+          limit: 3 // Retrieve top 3 relevant memories
+        });
+
+        if (relevantMemories && relevantMemories.length > 0) {
+          retrievedMemoryContext = "Relevant information from past conversations:\n" +
+            relevantMemories.map(mem => `- ${mem.content}`).join("\n") +
+            "\n---\n"; // Add separator
+          console.log("Retrieved memory context:", retrievedMemoryContext);
+        } else {
+          console.log("No relevant memories found.");
+        }
+      } catch (memoryError) {
+        console.error("Error retrieving memories:", memoryError);
+        // Continue without memory context if retrieval fails
+      }
+      // --- End Memory Retrieval ---
+
+      // Prepend memory context to the input
+      const agentInput = retrievedMemoryContext + lastUserMessage.content;
+
       // Invoke the agent with the last user message and chat history
       const result = await agentExecutor.invoke({
-        input: lastUserMessage.content,
+        input: agentInput, // Use modified input with memory context
         chat_history: history.slice(0, -1) // Exclude the last message as it's the input
       });
       

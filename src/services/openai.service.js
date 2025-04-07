@@ -2,6 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const composioService = require('./composio.service');
 const { AUGUST_SYSTEM_PROMPT } = require("../config/august-system-prompt");
+const memoryService = require('./memory.service'); // Import memory service
 
 class OpenAIService {
   constructor() {
@@ -125,9 +126,10 @@ class OpenAIService {
   /**
    * Generate a chat completion directly without using tools
    * @param {Array} messages - Chat messages
+   * @param {string} userId - The ID of the user making the request
    * @returns {Object} - The assistant's response
    */
-  async generateChatCompletion(messages) {
+  async generateChatCompletion(messages, userId) { // Add userId parameter
     if (!this.isConfigured) {
       throw new Error('Azure OpenAI is not configured');
     }
@@ -141,13 +143,46 @@ class OpenAIService {
       // Form the Azure OpenAI API URL
       const apiUrl = `${normalizedEndpoint}/openai/deployments/${this.deploymentName}/chat/completions?api-version=${this.apiVersion}`;
       
-      // Prepare request payload
+      // --- Start Memory Retrieval ---
+      let finalMessages = [...messages]; // Clone messages array
+      const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
+      if (lastUserMessage && userId) { // Check if userId is provided
+        let retrievedMemoryContext = '';
+        const memoryQuery = lastUserMessage.content;
+        try {
+          console.log(`(OpenAI Non-Stream) Retrieving memories for query: "${memoryQuery}"`);
+          const relevantMemories = await memoryService.retrieveMemories({
+            query: memoryQuery,
+            userId: userId,
+            limit: 3 // Retrieve top 3 relevant memories
+          });
+
+          if (relevantMemories && relevantMemories.length > 0) {
+            retrievedMemoryContext = "Relevant information from past conversations:\n" +
+              relevantMemories.map(mem => `- ${mem.content}`).join("\n") +
+              "\n---\n"; // Add separator
+            console.log("(OpenAI Non-Stream) Retrieved memory context:", retrievedMemoryContext);
+
+            // Prepend context to the last user message in the cloned array
+            const lastUserMessageIndex = finalMessages.map(m => m.role).lastIndexOf('user');
+            if (lastUserMessageIndex !== -1) {
+              finalMessages[lastUserMessageIndex].content = retrievedMemoryContext + finalMessages[lastUserMessageIndex].content;
+            }
+          } else {
+            console.log("(OpenAI Non-Stream) No relevant memories found.");
+          }
+        } catch (memoryError) {
+          console.error("(OpenAI Non-Stream) Error retrieving memories:", memoryError);
+          // Continue without memory context if retrieval fails
+        }
+      }
+      // --- End Memory Retrieval ---
+
+      // Prepare request payload using potentially modified messages
       const payload = {
         messages: [
-          // Add system message
           { role: 'system', content: AUGUST_SYSTEM_PROMPT },
-          // Add user messages
-          ...messages
+          ...finalMessages // Use the array possibly modified with memory context
         ],
         temperature: 0.7,
         max_tokens: 800,
@@ -177,9 +212,10 @@ class OpenAIService {
    * Generate a streaming chat completion directly without using tools
    * @param {Array} messages - Chat messages
    * @param {Function} onChunk - Callback for each chunk of the response
+   * @param {string} userId - The ID of the user making the request
    * @returns {Promise} - Promise that resolves when streaming is complete
    */
-  async generateChatCompletionStream(messages, onChunk) {
+  async generateChatCompletionStream(messages, onChunk, userId) { // Add userId parameter
     if (!this.isConfigured) {
       console.error('Azure OpenAI is not configured. Keys missing:', {
         apiKey: !this.apiKey,
@@ -205,13 +241,46 @@ class OpenAIService {
       // Form the Azure OpenAI API URL
       const apiUrl = `${normalizedEndpoint}/openai/deployments/${this.deploymentName}/chat/completions?api-version=${this.apiVersion}`;
       
-      // Prepare request payload with streaming enabled
+      // --- Start Memory Retrieval ---
+      let finalMessages = [...messages]; // Clone messages array
+      const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
+      if (lastUserMessage && userId) { // Check if userId is provided
+        let retrievedMemoryContext = '';
+        const memoryQuery = lastUserMessage.content;
+        try {
+          console.log(`(OpenAI Stream) Retrieving memories for query: "${memoryQuery}"`);
+          const relevantMemories = await memoryService.retrieveMemories({
+            query: memoryQuery,
+            userId: userId,
+            limit: 3 // Retrieve top 3 relevant memories
+          });
+
+          if (relevantMemories && relevantMemories.length > 0) {
+            retrievedMemoryContext = "Relevant information from past conversations:\n" +
+              relevantMemories.map(mem => `- ${mem.content}`).join("\n") +
+              "\n---\n"; // Add separator
+            console.log("(OpenAI Stream) Retrieved memory context:", retrievedMemoryContext);
+
+            // Prepend context to the last user message in the cloned array
+            const lastUserMessageIndex = finalMessages.map(m => m.role).lastIndexOf('user');
+            if (lastUserMessageIndex !== -1) {
+              finalMessages[lastUserMessageIndex].content = retrievedMemoryContext + finalMessages[lastUserMessageIndex].content;
+            }
+          } else {
+            console.log("(OpenAI Stream) No relevant memories found.");
+          }
+        } catch (memoryError) {
+          console.error("(OpenAI Stream) Error retrieving memories:", memoryError);
+          // Continue without memory context if retrieval fails
+        }
+      }
+      // --- End Memory Retrieval ---
+
+      // Prepare request payload with streaming enabled using potentially modified messages
       const payload = {
         messages: [
-          // Add system message
           { role: 'system', content: AUGUST_SYSTEM_PROMPT },
-          // Add user messages
-          ...messages
+          ...finalMessages // Use the array possibly modified with memory context
         ],
         temperature: 0.7,
         max_tokens: 800,

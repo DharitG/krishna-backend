@@ -332,17 +332,20 @@ exports.sendMessage = async (req, res, next) => {
         if (stream) {
           // Use streaming approach
           console.log('Using streaming response');
+          // Pass userId to the streaming function
           await openaiService.generateChatCompletionStream(messages, (chunk) => {
             // Send each chunk as an SSE event
             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-          });
+          }, userId);
+          // Removed extra }); here
 
           // Signal the end of the stream
           res.write('data: [DONE]\n\n');
           res.end();
         } else {
           // Use non-streaming approach
-          const result = await openaiService.generateChatCompletion(messages);
+          // Pass userId to the non-streaming function
+          const result = await openaiService.generateChatCompletion(messages, userId);
           return res.json(result);
         }
       }
