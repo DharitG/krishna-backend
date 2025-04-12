@@ -2,7 +2,6 @@ const { supabase } = require('../services/supabase');
 const openaiService = require('../services/openai.service');
 const langchainService = require('../services/langchain.service');
 const composioService = require('../services/composio.service');
-const memoryService = require('../services/memory.service');
 
 /**
  * Get all chats for the current user
@@ -140,7 +139,7 @@ exports.updateChat = async (req, res, next) => {
     const updates = {};
     if (title !== undefined) updates.title = title;
     if (useTools !== undefined) updates.use_tools = useTools;
-    if (enabledTools !== undefined) updates.enabled_tools = enabledTools;
+    if (enabledTools !== undefined) updates.enabled_tools =enabledTools;
     updates.updated_at = new Date();
 
     // Update chat
@@ -216,23 +215,7 @@ exports.sendMessage = async (req, res, next) => {
       return res.status(400).json({ error: 'No user message found in the provided messages' });
     }
 
-    // Process the last user message for memory system (don't wait for completion)
-    try {
-      const chatId = req.body.chatId || 'unknown';
-      memoryService.processChatMessage({
-        userId,
-        content: lastUserMessage.content,
-        role: 'user',
-        chatId,
-        contextData
-      }).catch(err => {
-        console.error('Error processing user message for memory:', err);
-        // Don't fail the request if memory processing fails
-      });
-    } catch (memoryError) {
-      console.error('Error processing user message for memory:', memoryError);
-      // Don't fail the request if memory processing fails
-    }
+    // Memory system has been removed
 
     // Check if tools are needed/enabled
     const useTools = enabledTools && enabledTools.length > 0;
@@ -444,22 +427,7 @@ exports.saveMessage = async (req, res, next) => {
       return res.status(500).json({ error: 'Failed to save message' });
     }
 
-    // Process message for memory system (don't wait for completion)
-    try {
-      memoryService.processChatMessage({
-        userId,
-        content: message.content,
-        role: message.role,
-        chatId: conversationId,
-        contextData
-      }).catch(err => {
-        console.error('Error processing message for memory:', err);
-        // Don't fail the request if memory processing fails
-      });
-    } catch (memoryError) {
-      console.error('Error processing message for memory:', memoryError);
-      // Don't fail the request if memory processing fails
-    }
+    // Memory system has been removed
 
     res.json({ message: data[0] });
   } catch (error) {
