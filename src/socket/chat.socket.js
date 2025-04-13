@@ -2,6 +2,7 @@
 const openaiService = require('../services/openai.service');
 const langchainService = require('../services/langchain.service');
 const { supabase } = require('../services/supabase');
+const memoryService = require('../services/memory.service');
 
 /**
  * Simple function to generate a mock streaming response
@@ -207,7 +208,36 @@ const handleChatSocket = (io, socket) => {
         ...assistantMessage,
         chatId
       });
-      
+
+      // --- BEGIN ADDED MEMORY PROCESSING ---
+      try {
+        // Find the last user message in the history
+        const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+        if (lastUserMessage && assistantMessage.content) {
+          const userMessageContent = lastUserMessage.content;
+          const aiResponseContent = assistantMessage.content;
+          const transcriptForMemory = `User: ${userMessageContent}\nAI: ${aiResponseContent}`;
+
+          console.log(`Chat Socket: Triggering memory processing for user ${userId} in chat ${chatId}`);
+          // Call asynchronously, don't wait for completion
+          memoryService.processAndStoreMemories(userId, transcriptForMemory)
+            .then(count => {
+              if (count > 0) {
+                console.log(`Chat Socket: Memory storage successful, ${count} memories saved for user ${userId}.`);
+              }
+            })
+            .catch(memError => {
+              console.error(`Chat Socket: Error during background memory processing for user ${userId}:`, memError);
+            });
+        } else {
+          console.warn(`Chat Socket: Could not extract user message or AI response for memory processing in chat ${chatId}.`);
+        }
+      } catch (memProcessingError) {
+        // Catch errors specific to preparing data for memory service
+        console.error(`Chat Socket: Error preparing data for memory service for user ${userId}:`, memProcessingError);
+      }
+      // --- END ADDED MEMORY PROCESSING ---
+
       console.log('Message processing completed for chat:', chatId);
     } catch (error) {
       console.error('Error handling message:', error);
