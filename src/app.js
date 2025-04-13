@@ -42,6 +42,10 @@ const webhookRoutes = require('./routes/webhook.routes');
 const subscriptionRoutes = require('./routes/subscription.routes');
 const authRoutes = require('./routes/auth.routes');
 const oauthRedirectRoutes = require('./routes/oauth-redirect.routes');
+const briefsRoutes = require('./routes/briefs.routes');
+
+// Import Services (only if needed directly in app.js, like for scheduler)
+const briefsService = require('./services/briefs.service');
 
 // Apply stricter rate limits to authentication routes
 app.use('/api/auth', authRateLimit, authRoutes);
@@ -65,6 +69,7 @@ app.use('/api/langchain', requireAuth, checkRateLimit, langchainRoutes);
 app.use('/api/preferences', requireAuth, checkRateLimit, preferencesRoutes);
 app.use('/api/chats', requireAuth, checkRateLimit, chatRoutes);
 app.use('/api/accounts', requireAuth, checkRateLimit, accountRoutes);
+app.use('/api/briefs', requireAuth, checkRateLimit, briefsRoutes);
 
 // Register OAuth redirect routes (no auth required - these are public endpoints for OAuth callbacks)
 app.use('/oauth', oauthRedirectRoutes);
@@ -101,5 +106,8 @@ app.use((err, req, res, next) => {
     error: process.env.NODE_ENV === 'development' ? err : {}
   });
 });
+
+// Start the briefs scheduler
+briefsService.startScheduler();
 
 module.exports = app;
