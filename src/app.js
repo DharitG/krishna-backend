@@ -43,6 +43,7 @@ const subscriptionRoutes = require('./routes/subscription.routes');
 const authRoutes = require('./routes/auth.routes');
 const oauthRedirectRoutes = require('./routes/oauth-redirect.routes');
 const briefsRoutes = require('./routes/briefs.routes');
+const memoryRoutes = require('./routes/memory.routes');
 
 // Import Services (only if needed directly in app.js, like for scheduler)
 const briefsService = require('./services/briefs.service');
@@ -70,6 +71,7 @@ app.use('/api/preferences', requireAuth, checkRateLimit, preferencesRoutes);
 app.use('/api/chats', requireAuth, checkRateLimit, chatRoutes);
 app.use('/api/accounts', requireAuth, checkRateLimit, accountRoutes);
 app.use('/api/briefs', requireAuth, checkRateLimit, briefsRoutes);
+app.use('/api/memory', requireAuth, checkRateLimit, memoryRoutes);
 
 // Register OAuth redirect routes (no auth required - these are public endpoints for OAuth callbacks)
 app.use('/oauth', oauthRedirectRoutes);

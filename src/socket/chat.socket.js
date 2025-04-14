@@ -14,7 +14,7 @@ const memoryService = require('../services/memory.service');
 const simulateStreamingResponse = async (socket, message, content, chatId) => {
   const words = content.split(' ');
   let currentContent = '';
-  
+
   for (const word of words) {
     currentContent += word + ' ';
     socket.emit('message_chunk', {
@@ -22,7 +22,7 @@ const simulateStreamingResponse = async (socket, message, content, chatId) => {
       content: currentContent.trim(),
       chatId
     });
-    
+
     // Add a small delay to simulate typing
     await new Promise(resolve => setTimeout(resolve, 50));
   }
@@ -39,13 +39,13 @@ const handleChatSocket = (io, socket) => {
     socket.join(`chat_${chatId}`);
     console.log(`User ${socket.user.id} joined chat room: chat_${chatId}`);
   });
-  
+
   // Leave a chat room
   socket.on('leave_chat', (chatId) => {
     socket.leave(`chat_${chatId}`);
     console.log(`User ${socket.user.id} left chat room: chat_${chatId}`);
   });
-  
+
   // Handle new message
   socket.on('send_message', async (data) => {
     try {
@@ -55,57 +55,57 @@ const handleChatSocket = (io, socket) => {
         toolCount: data?.enabledTools?.length,
         authStatus: Object.keys(data?.authStatus || {})
       });
-      
+
       const { messages, enabledTools = [], useTools = true, chatId, authStatus = {} } = data;
       const userId = socket.user.id;
-      
+
       // Validate input
       if (!Array.isArray(messages) || messages.length === 0) {
         console.error('Invalid messages format:', data);
         return socket.emit('error', { message: 'Invalid messages format' });
       }
-      
+
       // Emit typing indicator
       socket.emit('typing_start', { chatId });
-      
+
       // Initialize response object
       const assistantMessage = {
         role: 'assistant',
         content: '',
         id: `msg-${Date.now()}`
       };
-      
+
       // Determine if we need to use tools
       if (useTools && enabledTools.length > 0) {
         // Process with tools using LangChain
         try {
           console.log(`Processing message with tools using LangChain: ${enabledTools.join(', ')}`);
-          
+
           // Get service tokens for authentication status
           const { data: serviceTokens, error: tokensError } = await supabase
             .from('service_tokens')
             .select('service_name, access_token, expires_at')
             .eq('user_id', userId);
-          
+
           // Process auth status
           const combinedAuthStatus = { ...authStatus };
           const now = new Date();
-          
+
           if (serviceTokens) {
             serviceTokens.forEach(token => {
               const isValid = token.expires_at ? new Date(token.expires_at) > now : false;
               combinedAuthStatus[token.service_name.toLowerCase()] = isValid;
             });
           }
-          
+
           // Stream the response
           const stream = await langchainService.getStreamingAgentResponse(
-            messages, 
+            messages,
             enabledTools,
             userId,
             combinedAuthStatus
           );
-          
+
           // Process the stream
           for await (const chunk of stream) {
             // Check if this chunk has an auth request
@@ -115,12 +115,12 @@ const handleChatSocket = (io, socket) => {
                 service: chunk.service,
                 message: chunk.content
               });
-              
+
               // Update assistant message with auth request
               assistantMessage.content = chunk.content;
               assistantMessage.requiresAuth = true;
               assistantMessage.service = chunk.service;
-              
+
               // Emit the updated message
               socket.emit('message_chunk', {
                 ...assistantMessage,
@@ -129,7 +129,7 @@ const handleChatSocket = (io, socket) => {
             } else if (chunk.content) {
               // Update assistant message
               assistantMessage.content = chunk.content;
-              
+
               // Emit the updated message
               socket.emit('message_chunk', {
                 ...assistantMessage,
@@ -137,15 +137,15 @@ const handleChatSocket = (io, socket) => {
               });
             }
           }
-          
+
           console.log('Successfully processed message with tools');
         } catch (error) {
           console.error('Error processing message with tools:', error);
           socket.emit('error', { message: 'Error processing message with tools' });
-          
+
           // Fallback to a simple response
           assistantMessage.content = "I'm sorry, I encountered an error while processing your request with tools. Please try again or contact support if the issue persists.";
-          
+
           // Simulate streaming for a better user experience
           await simulateStreamingResponse(socket, assistantMessage, assistantMessage.content, chatId);
         }
@@ -153,7 +153,7 @@ const handleChatSocket = (io, socket) => {
         // Process without tools using OpenAI directly
         try {
           console.log('Processing message without tools using OpenAI');
-          
+
           // Use a simple response if OpenAI is not configured
           if (!openaiService.isConfigured) {
             console.warn('OpenAI service is not configured, using fallback response');
@@ -171,17 +171,17 @@ const handleChatSocket = (io, socket) => {
                 });
               }
             };
-            
+
             // Get streaming response from OpenAI
             console.log('Requesting streaming response from OpenAI');
             try {
               // The generateChatCompletionStream function returns a Promise that resolves to the final message
               // It already calls onChunk for each chunk of the response
               const finalMessage = await openaiService.generateChatCompletionStream(messages, onChunk);
-              
+
               // Update assistant message with the final content
               assistantMessage.content = finalMessage.content;
-              
+
               console.log('Successfully processed OpenAI streaming response');
             } catch (streamError) {
               console.error('Error in OpenAI streaming:', streamError);
@@ -191,18 +191,18 @@ const handleChatSocket = (io, socket) => {
         } catch (error) {
           console.error('Error processing message without tools:', error);
           socket.emit('error', { message: 'Error processing message without tools' });
-          
+
           // Fallback to a simple response
           assistantMessage.content = "I'm sorry, I encountered an error while processing your request. This may be due to an issue with the OpenAI service.";
-          
+
           // Simulate streaming for a better user experience
           await simulateStreamingResponse(socket, assistantMessage, assistantMessage.content, chatId);
         }
       }
-      
+
       // Emit typing stopped
       socket.emit('typing_stop', { chatId });
-      
+
       // Emit final message
       socket.emit('message_complete', {
         ...assistantMessage,
@@ -229,6 +229,12 @@ const handleChatSocket = (io, socket) => {
             .catch(memError => {
               console.error(`Chat Socket: Error during background memory processing for user ${userId}:`, memError);
             });
+
+          // Emit memory update event to the client
+          socket.emit('memory_updated', {
+            message: 'Memory system updated with new information',
+            count: 1 // We don't know the exact count yet, but we know at least one memory was processed
+          });
         } else {
           console.warn(`Chat Socket: Could not extract user message or AI response for memory processing in chat ${chatId}.`);
         }

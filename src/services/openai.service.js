@@ -11,11 +11,11 @@ class OpenAIService {
     this.deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_NAME;
     this.isConfigured = !!(this.apiKey && this.endpoint && this.deploymentName);
     this.apiVersion = '2024-10-21'; // Update as needed
-    
+
     if (!this.isConfigured) {
       console.warn('Azure OpenAI not configured. Chat features will be limited.');
     }
-    
+
     this.client = axios.create({
       headers: {
         'Content-Type': 'application/json',
@@ -39,16 +39,16 @@ class OpenAIService {
 
     try {
       // Normalize endpoint (remove trailing slash if present)
-      const normalizedEndpoint = this.endpoint.endsWith('/') 
-        ? this.endpoint.slice(0, -1) 
+      const normalizedEndpoint = this.endpoint.endsWith('/')
+        ? this.endpoint.slice(0, -1)
         : this.endpoint;
-      
+
       // Form the Azure OpenAI API URL
       const apiUrl = `${normalizedEndpoint}/openai/deployments/${this.deploymentName}/chat/completions?api-version=${this.apiVersion}`;
-      
+
       // Get tools from Composio if requested
       const tools = useTools ? await composioService.getTools(enabledTools) : [];
-      
+
       // Prepare request payload
       const payload = {
         messages: [
@@ -64,19 +64,19 @@ class OpenAIService {
         presence_penalty: 0,
         stop: null
       };
-      
+
       // Add tools to request if available
       if (useTools && tools.length > 0) {
         payload.tools = tools;
         payload.tool_choice = 'auto';
       }
-      
+
       // Send request to Azure OpenAI
       const response = await this.client.post(apiUrl, payload);
-      
+
       // Get assistant message from response
       const assistantMessage = response.data.choices[0].message;
-      
+
       // Check for tool calls
       if (assistantMessage.tool_calls?.length > 0) {
         // Extract service names from tool calls
@@ -84,10 +84,10 @@ class OpenAIService {
           const serviceName = tc.function.name.split('_')[0].toLowerCase();
           return serviceName;
         });
-        
+
         // Check for unauthenticated services
         const unauthenticatedServices = toolNames.filter(service => !authStatus[service]);
-        
+
         if (unauthenticatedServices.length > 0) {
           // Return authentication request message
           return {
@@ -95,14 +95,14 @@ class OpenAIService {
             content: `I need to access certain services to help you with this request. Please authenticate with the following services: ${unauthenticatedServices.join(', ')}`
           };
         }
-        
+
         // Process tool calls
         try {
           const result = await composioService.handleToolCalls(
             assistantMessage.tool_calls,
             authStatus
           );
-          
+
           return {
             role: 'assistant',
             content: `I've used tools to help with your request: ${result.result}`
@@ -114,7 +114,7 @@ class OpenAIService {
           };
         }
       }
-      
+
       // Return standard assistant message if no tool calls
       return assistantMessage;
     } catch (error) {
@@ -136,22 +136,23 @@ class OpenAIService {
 
     try {
       // Normalize endpoint (remove trailing slash if present)
-      const normalizedEndpoint = this.endpoint.endsWith('/') 
-        ? this.endpoint.slice(0, -1) 
+      const normalizedEndpoint = this.endpoint.endsWith('/')
+        ? this.endpoint.slice(0, -1)
         : this.endpoint;
-      
+
       // Form the Azure OpenAI API URL
       const apiUrl = `${normalizedEndpoint}/openai/deployments/${this.deploymentName}/chat/completions?api-version=${this.apiVersion}`;
-      
-      // --- Start Memory Retrieval ---
+
+      // --- Start Memory Retrieval with Gemini ---
       let finalMessages = [...messages]; // Clone messages array
       const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
       if (lastUserMessage && userId) { // Check if userId is provided
         let retrievedMemoryContext = '';
         const memoryQuery = lastUserMessage.content;
         try {
-          console.log(`(OpenAI Non-Stream) Retrieving memories for query: "${memoryQuery}"`);
-          const relevantMemories = await memoryService.retrieveMemories({
+          console.log(`(OpenAI Non-Stream) Retrieving memories with Gemini for query: "${memoryQuery}"`);
+          // Use Gemini-powered memory retrieval for more intelligent selection
+          const relevantMemories = await memoryService.retrieveMemoriesWithGemini({
             query: memoryQuery,
             userId: userId,
             limit: 3 // Retrieve top 3 relevant memories
@@ -161,7 +162,7 @@ class OpenAIService {
             retrievedMemoryContext = "Relevant information from past conversations:\n" +
               relevantMemories.map(mem => `- ${mem.content}`).join("\n") +
               "\n---\n"; // Add separator
-            console.log("(OpenAI Non-Stream) Retrieved memory context:", retrievedMemoryContext);
+            console.log("(OpenAI Non-Stream) Retrieved memory context with Gemini:", retrievedMemoryContext);
 
             // Prepend context to the last user message in the cloned array
             const lastUserMessageIndex = finalMessages.map(m => m.role).lastIndexOf('user');
@@ -169,11 +170,35 @@ class OpenAIService {
               finalMessages[lastUserMessageIndex].content = retrievedMemoryContext + finalMessages[lastUserMessageIndex].content;
             }
           } else {
-            console.log("(OpenAI Non-Stream) No relevant memories found.");
+            console.log("(OpenAI Non-Stream) No relevant memories found with Gemini.");
           }
         } catch (memoryError) {
-          console.error("(OpenAI Non-Stream) Error retrieving memories:", memoryError);
-          // Continue without memory context if retrieval fails
+          console.error("(OpenAI Non-Stream) Error retrieving memories with Gemini:", memoryError);
+          // Fall back to standard retrieval if Gemini fails
+          try {
+            console.log(`(OpenAI Non-Stream) Falling back to standard memory retrieval for query: "${memoryQuery}"`);
+            const fallbackMemories = await memoryService.retrieveMemories({
+              query: memoryQuery,
+              userId: userId,
+              limit: 3
+            });
+
+            if (fallbackMemories && fallbackMemories.length > 0) {
+              retrievedMemoryContext = "Relevant information from past conversations:\n" +
+                fallbackMemories.map(mem => `- ${mem.content}`).join("\n") +
+                "\n---\n"; // Add separator
+              console.log("(OpenAI Non-Stream) Retrieved memory context with fallback:", retrievedMemoryContext);
+
+              // Prepend context to the last user message in the cloned array
+              const lastUserMessageIndex = finalMessages.map(m => m.role).lastIndexOf('user');
+              if (lastUserMessageIndex !== -1) {
+                finalMessages[lastUserMessageIndex].content = retrievedMemoryContext + finalMessages[lastUserMessageIndex].content;
+              }
+            }
+          } catch (fallbackError) {
+            console.error("(OpenAI Non-Stream) Error in fallback memory retrieval:", fallbackError);
+            // Continue without memory context if all retrieval methods fail
+          }
         }
       }
       // --- End Memory Retrieval ---
@@ -191,13 +216,13 @@ class OpenAIService {
         presence_penalty: 0,
         stop: null
       };
-      
+
       // Send request to Azure OpenAI
       const response = await this.client.post(apiUrl, payload);
-      
+
       // Get assistant message from response
       const assistantMessage = response.data.choices[0].message;
-      
+
       return {
         role: 'assistant',
         content: assistantMessage.content
@@ -232,24 +257,25 @@ class OpenAIService {
         apiVersion: this.apiVersion,
         messageCount: messages.length
       });
-      
+
       // Normalize endpoint (remove trailing slash if present)
-      const normalizedEndpoint = this.endpoint.endsWith('/') 
-        ? this.endpoint.slice(0, -1) 
+      const normalizedEndpoint = this.endpoint.endsWith('/')
+        ? this.endpoint.slice(0, -1)
         : this.endpoint;
-      
+
       // Form the Azure OpenAI API URL
       const apiUrl = `${normalizedEndpoint}/openai/deployments/${this.deploymentName}/chat/completions?api-version=${this.apiVersion}`;
-      
-      // --- Start Memory Retrieval ---
+
+      // --- Start Memory Retrieval with Gemini ---
       let finalMessages = [...messages]; // Clone messages array
       const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
       if (lastUserMessage && userId) { // Check if userId is provided
         let retrievedMemoryContext = '';
         const memoryQuery = lastUserMessage.content;
         try {
-          console.log(`(OpenAI Stream) Retrieving memories for query: "${memoryQuery}"`);
-          const relevantMemories = await memoryService.retrieveMemories({
+          console.log(`(OpenAI Stream) Retrieving memories with Gemini for query: "${memoryQuery}"`);
+          // Use Gemini-powered memory retrieval for more intelligent selection
+          const relevantMemories = await memoryService.retrieveMemoriesWithGemini({
             query: memoryQuery,
             userId: userId,
             limit: 3 // Retrieve top 3 relevant memories
@@ -259,7 +285,7 @@ class OpenAIService {
             retrievedMemoryContext = "Relevant information from past conversations:\n" +
               relevantMemories.map(mem => `- ${mem.content}`).join("\n") +
               "\n---\n"; // Add separator
-            console.log("(OpenAI Stream) Retrieved memory context:", retrievedMemoryContext);
+            console.log("(OpenAI Stream) Retrieved memory context with Gemini:", retrievedMemoryContext);
 
             // Prepend context to the last user message in the cloned array
             const lastUserMessageIndex = finalMessages.map(m => m.role).lastIndexOf('user');
@@ -267,11 +293,35 @@ class OpenAIService {
               finalMessages[lastUserMessageIndex].content = retrievedMemoryContext + finalMessages[lastUserMessageIndex].content;
             }
           } else {
-            console.log("(OpenAI Stream) No relevant memories found.");
+            console.log("(OpenAI Stream) No relevant memories found with Gemini.");
           }
         } catch (memoryError) {
-          console.error("(OpenAI Stream) Error retrieving memories:", memoryError);
-          // Continue without memory context if retrieval fails
+          console.error("(OpenAI Stream) Error retrieving memories with Gemini:", memoryError);
+          // Fall back to standard retrieval if Gemini fails
+          try {
+            console.log(`(OpenAI Stream) Falling back to standard memory retrieval for query: "${memoryQuery}"`);
+            const fallbackMemories = await memoryService.retrieveMemories({
+              query: memoryQuery,
+              userId: userId,
+              limit: 3
+            });
+
+            if (fallbackMemories && fallbackMemories.length > 0) {
+              retrievedMemoryContext = "Relevant information from past conversations:\n" +
+                fallbackMemories.map(mem => `- ${mem.content}`).join("\n") +
+                "\n---\n"; // Add separator
+              console.log("(OpenAI Stream) Retrieved memory context with fallback:", retrievedMemoryContext);
+
+              // Prepend context to the last user message in the cloned array
+              const lastUserMessageIndex = finalMessages.map(m => m.role).lastIndexOf('user');
+              if (lastUserMessageIndex !== -1) {
+                finalMessages[lastUserMessageIndex].content = retrievedMemoryContext + finalMessages[lastUserMessageIndex].content;
+              }
+            }
+          } catch (fallbackError) {
+            console.error("(OpenAI Stream) Error in fallback memory retrieval:", fallbackError);
+            // Continue without memory context if all retrieval methods fail
+          }
         }
       }
       // --- End Memory Retrieval ---
@@ -290,9 +340,9 @@ class OpenAIService {
         stop: null,
         stream: true
       };
-      
+
       console.log('Sending streaming request to:', apiUrl.replace(this.apiKey, '[REDACTED]'));
-      
+
       // Create a custom axios instance for streaming
       const streamingClient = axios.create({
         headers: {
@@ -301,11 +351,11 @@ class OpenAIService {
         },
         responseType: 'stream'
       });
-      
+
       // Send streaming request to Azure OpenAI
       const response = await streamingClient.post(apiUrl, payload);
       console.log('Streaming response received, status:', response.status);
-      
+
       // Process the stream
       return new Promise((resolve, reject) => {
         let buffer = '';
@@ -313,33 +363,33 @@ class OpenAIService {
           role: 'assistant',
           content: ''
         };
-        
+
         response.data.on('data', (chunk) => {
           const chunkString = chunk.toString();
           buffer += chunkString;
-          
+
           // Process complete lines from buffer
           let lines = buffer.split('\n');
           buffer = lines.pop(); // Keep the last incomplete line in the buffer
-          
+
           for (const line of lines) {
             // Skip empty lines
             if (!line.trim()) continue;
-            
+
             // Handle data lines
             if (line.startsWith('data: ')) {
               const data = line.substring(6);
-              
+
               // Check for end of stream
               if (data === '[DONE]') {
                 onChunk(assistantMessage);
                 return;
               }
-              
+
               try {
                 const parsed = JSON.parse(data);
                 const content = parsed.choices[0]?.delta?.content || '';
-                
+
                 if (content) {
                   assistantMessage.content += content;
                   // Clone the message to avoid reference issues
@@ -351,7 +401,7 @@ class OpenAIService {
             }
           }
         });
-        
+
         response.data.on('end', () => {
           // Process any remaining data in the buffer
           if (buffer.trim() && buffer.startsWith('data: ')) {
@@ -360,7 +410,7 @@ class OpenAIService {
               if (data !== '[DONE]') {
                 const parsed = JSON.parse(data);
                 const content = parsed.choices[0]?.delta?.content || '';
-                
+
                 if (content) {
                   assistantMessage.content += content;
                   onChunk({...assistantMessage});
@@ -370,11 +420,11 @@ class OpenAIService {
               console.error('Error parsing final streaming data:', e, buffer);
             }
           }
-          
+
           console.log('Streaming completed successfully');
           resolve(assistantMessage);
         });
-        
+
         response.data.on('error', (err) => {
           console.error('Streaming error:', err);
           reject(err);
