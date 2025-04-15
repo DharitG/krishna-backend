@@ -1,120 +1,57 @@
 # August Backend API
 
-This is the backend API for the August AI Super Agent mobile app. It handles authentication, user management, and integrations with external services like Composio and Azure OpenAI.
+This directory contains the backend API for the August AI Super Agent mobile app. It handles authentication, user management, chat processing, and integrations with external services.
 
 ## Features
 
-- User authentication via Supabase
-- Chat history storage and management
-- Integration with Azure OpenAI for AI conversations
-- Composio integration for tool capabilities (GitHub, Gmail, Slack, etc.)
-- User preferences and settings management
-- Cross-conversation memory system with pgvector
+*   User authentication via Supabase
+*   Chat history storage and management
+*   Integration with Azure OpenAI via LangChain for AI conversations
+*   Composio integration for tool capabilities (GitHub, Gmail, Slack, etc.)
+*   Subscription management via RevenueCat
+*   User preferences and settings management
+*   Cross-conversation memory system (using pgvector)
+*   Rate limiting (Subscription-based and IP-based)
 
 ## Technology Stack
 
-- **Node.js/Express**: Backend API framework
-- **Supabase**: Authentication and database
-- **Azure OpenAI**: AI chat capabilities
-- **Composio**: Tool integrations for productivity
-- **pgvector**: Vector storage for memory system
+*   **Node.js/Express**: Backend API framework
+*   **Supabase**: Authentication and PostgreSQL database
+*   **LangChain.js**: AI agent framework
+*   **Azure OpenAI**: AI chat and embedding models
+*   **Composio**: Tool integration layer
+*   **RevenueCat**: Subscription management
+*   **pgvector**: Vector storage for memory system
 
-## Getting Started
+## Documentation
 
-See [SETUP.md](./SETUP.md) for detailed setup instructions.
+**For detailed setup instructions, architecture information, API reference, feature guides, and more, please refer to the main project documentation located in the `/docs` directory at the root of the repository.**
 
-For setting up Composio integration (required for Gmail, GitHub, and other tool capabilities), see [COMPOSIO_SETUP.md](./COMPOSIO_SETUP.md).
+Key relevant documents include:
 
-## Environment Variables
-
-The following environment variables need to be set in a `.env` file:
-
-```makefile
-# Server Configuration
-PORT=3000
-NODE_ENV=development
-BACKEND_URL=http://localhost:3000
-APP_URL=exp://localhost:8081
-
-# Supabase Configuration
-SUPABASE_URL=https://your-project-id.supabase.co
-SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_KEY=your-service-key
-
-# Composio Configuration
-COMPOSIO_API_KEY=your-composio-api-key
-
-# Azure OpenAI Configuration
-AZURE_OPENAI_API_KEY=your-azure-api-key
-AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com
-AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
-AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=your-embedding-deployment-name
-
-# OpenAI Configuration (alternative to Azure)
-# OPENAI_API_KEY=your-openai-api-key
-# OPENAI_EMBEDDING_MODEL=text-embedding-large
-```
+*   **[Backend Setup Guide](../../docs/getting-started/backend-setup.md)**
+*   **[External Service Integration Setup](../../docs/getting-started/integrations-setup.md)**
+*   **[API Reference](../../docs/api/README.md)**
+*   **[AI Agent Architecture](../../docs/features/ai-agents.md)**
+*   **[Subscription System Guide](../../docs/features/subscriptions.md)**
+*   **[Main Project Documentation](../../docs/README.md)**
 
 ## Development
 
-To run the server in development mode:
+Once setup is complete (following the guides in `/docs`), you can run the server in development mode from this directory:
 
 ```bash
-npm run dev
+# Ensure dependencies are installed
+# npm install or yarn install
+
+# Start the server in development mode (with auto-reloading)
+npm run dev 
 ```
 
-## API Endpoints
-
-### User Management
-
-- `GET /api/user/profile`: Get user profile
-- `PUT /api/user/profile`: Update user profile
-- `GET /api/user/auth-status`: Get authentication status for services
-
-### Preferences
-
-- `GET /api/preferences`: Get user preferences
-- `PUT /api/preferences`: Update user preferences
-
-### Chat
-
-- `GET /api/chats`: Get all user chats
-- `POST /api/chats`: Create a new chat
-- `GET /api/chats/:chatId`: Get chat by ID
-- `PUT /api/chats/:chatId`: Update chat details
-- `DELETE /api/chats/:chatId`: Delete a chat
-- `POST /api/chats/:chatId/messages`: Send a message in a chat
-- `GET /api/chats/:chatId/messages`: Get messages from a chat
-
-### Composio Integration
-
-- `POST /api/composio/auth/init/:service`: Initialize authentication with a service
-- `GET /api/composio/auth/callback`: Authentication callback endpoint
-- `GET /api/composio/tools`: Get available tools
-- `POST /api/composio/execute`: Execute tool calls
-
-### Health Check
-
-- `GET /health`: API health check endpoint (no auth required)
-
-## Database Schema
-
-The backend uses Supabase with the following tables:
-
-1. `profiles` - User profile information
-2. `chats` - Chat conversations and messages
-3. `service_tokens` - Authentication tokens for third-party services
-
-Row Level Security (RLS) is enabled on all tables to ensure users can only access their own data.
-
-## Authentication
-
-The backend uses Supabase Authentication, which provides:
-
-- Email/password login
-- Social login (Google, GitHub, etc.)
-- Magic link authentication
-- JWT-based auth with secure token handling
+To run in production mode:
+```bash
+npm start
+```
 
 ## License
 

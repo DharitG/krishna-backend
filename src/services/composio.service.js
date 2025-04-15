@@ -337,6 +337,38 @@ class ComposioService {
       };
     }
   }
+
+  /**
+   * Validate the status of a Composio connection directly
+   * @param {string} connectionId - The Composio connectedAccountId
+   * @returns {Promise<boolean>} - True if the connection is valid ('connected'), false otherwise
+   */
+  async validateConnection(connectionId) {
+    if (!this.isConfigured) {
+      console.error('Cannot validate connection: Composio not configured');
+      // Default to false if not configured, preventing potential errors
+      return false;
+    }
+    if (!connectionId) {
+      console.warn('validateConnection called with no connectionId');
+      return false;
+    }
+
+    try {
+      console.log(`Validating Composio connection: ${connectionId}`);
+      const connection = await this.toolset.connectedAccounts.get({
+        connectedAccountId: connectionId
+      });
+
+      console.log(`Connection status for ${connectionId}: ${connection.connectionStatus}`);
+      // Consider the connection valid only if Composio explicitly says it's 'connected'
+      return connection.connectionStatus === 'connected';
+    } catch (error) {
+      console.error(`Error validating connection ${connectionId}:`, error.message);
+      // If there's an error fetching the status (e.g., connection not found), treat it as invalid
+      return false;
+    }
+  }
   
   /**
    * Get available tools from Composio

@@ -564,57 +564,46 @@ exports.checkAuth = async (req, res, next) => {
     
     // If we don't have a user ID, return not authenticated
     // Authentication is now required by middleware
-    
-    // Check if the user has a token for this service
-    const { data: token, error } = await supabase
+
+    // Check if the user has a connection ID stored in our database
+    const { data: tokenData, error: dbError } = await supabase
       .from('service_tokens')
-      .select('access_token, refresh_token, expires_at')
+      .select('access_token') // Composio connectionId is stored in access_token
       .eq('user_id', userId)
       .eq('service_name', service.toLowerCase())
       .single();
-    
-    if (error || !token) {
+
+    if (dbError || !tokenData || !tokenData.access_token) {
+      console.log(`No connection record found for user ${userId}, service ${service}`);
       return res.json({
         authenticated: false,
         service,
-        message: 'Not authenticated'
+        message: 'Not connected'
       });
     }
-    
-    // Check if the token is expired
-    const now = new Date();
-    const expiresAt = token.expires_at ? new Date(token.expires_at) : null;
-    const isExpired = expiresAt && expiresAt <= now;
-    
-    if (isExpired) {
-      // Token is expired, try to refresh it
-      try {
-        // This is a placeholder for token refresh logic
-        // In a real implementation, you would use the refresh_token to get a new access_token
-        // For now, we'll just return that the token is expired
-        return res.json({
-          authenticated: false,
-          service,
-          message: 'Token expired',
-          needsReauth: true
-        });
-      } catch (refreshError) {
-        console.error('Error refreshing token:', refreshError);
-        return res.json({
-          authenticated: false,
-          service,
-          message: 'Token expired and refresh failed',
-          needsReauth: true
-        });
-      }
+
+    const connectionId = tokenData.access_token;
+
+    // Validate the connection status directly with Composio
+    const isValid = await composioService.validateConnection(connectionId);
+
+    if (isValid) {
+      console.log(`Connection ${connectionId} for user ${userId}, service ${service} is valid.`);
+      return res.json({
+        authenticated: true,
+        service,
+        message: 'Authenticated'
+      });
+    } else {
+      console.log(`Connection ${connectionId} for user ${userId}, service ${service} is invalid or expired.`);
+      // If Composio says the connection is not valid, signal the need for re-authentication
+      return res.json({
+        authenticated: false,
+        service,
+        message: 'Connection invalid or expired',
+        needsReauth: true
+      });
     }
-    
-    // Token is valid
-    return res.json({
-      authenticated: true,
-      service,
-      message: 'Authenticated'
-    });
   } catch (error) {
     console.error(`Error checking ${req.params.service} authentication:`, error);
     next(error);
